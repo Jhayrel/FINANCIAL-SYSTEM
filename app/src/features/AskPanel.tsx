@@ -730,7 +730,7 @@ const NOT_ANSWERED = "That one was not answered:";
 const CHAT_DEADLINE_MS = 60_000;
 /** "give me it again", "redo the entry", "do it again": the cards just discarded, made again. */
 const AGAIN =
-  /\b(?:give\s+(?:me\s+)?(?:it\s+|that\s+|them\s+|the\s+(?:entry|entries|card|cards)\s+)?again|(?:re)?do\s+(?:it|that|them|the\s+(?:entry|entries|card|cards))\s+again|redo\s+(?:it|that|them|the\s+(?:entry|entries|card|cards))|make\s+(?:it|them|the\s+(?:entry|entries|card|cards))\s+again|ulitin)\b/i;
+  /\b(?:(?:retry|redo|reopen|bring\s+back|give\s+(?:me\s+)?back)\s+(?:the\s+|that\s+|my\s+)?(?:discard(?:ed)?|last|thrown[\s-]?away|closed)\s*(?:entry|entries|card|cards|one|ones)?|give\s+(?:me\s+)?(?:it\s+|that\s+|them\s+|the\s+(?:entry|entries|card|cards)\s+)?again|(?:re)?do\s+(?:it|that|them|the\s+(?:entry|entries|card|cards))\s+again|redo\s+(?:it|that|them|the\s+(?:entry|entries|card|cards))|make\s+(?:it|them|the\s+(?:entry|entries|card|cards))\s+again|ulitin)\b/i;
 
 /**
  * The message whose cards were all just discarded, for "give me it again":
@@ -2822,6 +2822,8 @@ export function AskPanel({
     };
   };
   const saidItemWords = (item: string, aside = false): string => (aside ? `Booked as ${item}, as you said.` : `Booked as ${item}: you said they were all ${item}.`);
+  /** The spending card made last within the message being read, for "also" in a message of several entries. Cleared at each send. */
+  const offeredInSend = useRef<RecentEntry | null>(null);
   /** The entry card said last in this conversation, added or still open, for "also" (`entryAside.ts`). */
   const entryJustBefore = (): RecentEntry | null => {
     for (const t of [...turns].reverse().slice(0, 8)) {
@@ -3056,7 +3058,14 @@ export function AskPanel({
      * amount as the entry just before, said on the card (`entryAside.ts`).
      * Two PHP 0.00 cards came of it on 10 November 2026.
      */
-    const carried = !batch && given.draft.flow === "Spending" && (given.draft.amount ?? 0) <= 0 ? sameAsBefore(given.said ?? hint, entryJustBefore()) : null;
+    /*
+     * In one message of several entries too: "paid jeep fare ... cash. I also
+     * paid fare for my classmate" asked how much the second was (owner, 11
+     * November 2026). The entry before is then the card made a moment ago in
+     * the same message (`offeredInSend`), not yet in the conversation.
+     */
+    const carried = given.draft.flow === "Spending" && (given.draft.amount ?? 0) <= 0 ? sameAsBefore(given.said ?? hint, offeredInSend.current ?? entryJustBefore()) : null;
+    if ((given.draft.amount ?? 0) > 0 && given.draft.flow === "Spending") offeredInSend.current = { amount: given.draft.amount, item: given.draft.item, description: given.draft.description, said: given.said ?? hint };
     const proposal: Proposal = carried
       ? {
           ...given,
@@ -3568,7 +3577,21 @@ export function AskPanel({
     }
     const others = changes.length - (updated.has(card.cardId) ? 1 : 0);
     const told = [
-      what || "That did not change the card, so it stays as it is. Fix it on the card if it needs it.",
+      /*
+       * The answer was what the card already says: said as kept, not as a
+       * failure. Tapping "Allowance" under a card filed as Allowance was told
+       * "That did not change the card", which read as the button not working
+       * (owner, 14 November 2026: "the follow-up question is not responding
+       * properly even I click it").
+       */
+      what ||
+        (asking.blank === "item" && filled.item.trim()
+          ? `Kept as ${filled.item}.`
+          : asking.blank === "amount" && filled.amount !== null
+            ? `Kept at ${formatMoney(filled.amount)}.`
+            : (asking.blank === "fromWallet" || asking.blank === "toWallet") && filled[asking.blank].trim()
+              ? `Kept as ${filled[asking.blank]}.`
+              : "That did not change the card, so it stays as it is. Fix it on the card if it needs it."),
       others > 0 ? `The same for the ${others === 1 ? "other row" : `other ${others} rows`} like it.` : "",
     ].filter(Boolean).join(" ");
     say({ kind: "assistant", ephemeral: true, text: told, from: readBy });
@@ -4190,7 +4213,16 @@ export function AskPanel({
      */
     const extras =
       usable.length > result.proposals.length && result.proposals.length > 0
-        ? partsTheModelMissed(usable.map((p) => p.read.draft), result.proposals.map((p) => p.draft)).map((i) => usable[i]!).filter(Boolean)
+        ? partsTheModelMissed(usable.map((p) => p.read.draft), result.proposals.map((p) => p.draft))
+            .map((i) => usable[i]!)
+            .filter(Boolean)
+            /*
+             * Only a part with its own figure: the model read the message,
+             * and a part it left out with no amount is a remark, not an
+             * entry. "I spent ... in phone repair cash. its an emergency"
+             * added a second, empty Emergency card (12 November 2026).
+             */
+            .filter((p) => p.read.readsAsDebt || (p.read.draft.amount ?? 0) > 0)
         : [];
 
     if (usable.length > result.proposals.length && usable.length > 1 && result.proposals.length === 0) {
@@ -4604,7 +4636,13 @@ export function AskPanel({
       ? made
           // A row already in the ledger is not asked about: its card says which row it is.
           .filter((_, i) => !matchedAlone[i] && !matchedTogether.has(i))
-          .map((c) => (sent.length > 0 && confirmsIncome(c.draft) ? { ...c, confirm: true } : c))
+          /*
+           * Not when the owner's own words named what it was: "I recieved my
+           * allowance gcash", with its receipt, was asked "Filed as Allowance
+           * for now. What was it?" (14 November 2026). Their word for it is
+           * the answer already.
+           */
+          .map((c) => (sent.length > 0 && confirmsIncome(c.draft) && !(c.draft.item.trim().length >= 3 && new RegExp(`(?<![a-z0-9])${c.draft.item.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`).test(note.toLowerCase())) ? { ...c, confirm: true } : c))
           .filter((c) => cardQuestion(c.draft, reference, 1, 1, c.confirm ? { lines: [] } : undefined) !== null)
       : [];
     if (toAsk.length > 0) {
@@ -5724,6 +5762,7 @@ export function AskPanel({
 
   const sendNow = async (typed?: string, as?: Intent): Promise<void> => {
     const began = generation.current;
+    offeredInSend.current = null;
     const note = (typed ?? draft).trim();
     /*
      * "it" is the entry just added, when the latest card is one: "I buy food
@@ -5835,6 +5874,25 @@ export function AskPanel({
         say({ kind: "assistant", ephemeral: true, text: `The budget card is closed. Reading "${again}".`, from: "this device" });
         log(aiEvent("asked", "add", { text: `Meant: ${again}`.slice(0, 400) }));
         await sendNow(again);
+        return;
+      }
+    }
+    /*
+     * "plan: Emergency Fund," an amount, "no date yet", typed the way the
+     * assistant writes a plan: a Planner card, never an entry. With the
+     * model away it was read here as that much spending (owner, 12
+     * November 2026: "it register as entry").
+     */
+    if (!as && files.length === 0 && /^\s*plan\s*:/i.test(note) && sink.canPlan) {
+      const line = planLineIn(note);
+      const read = line ? readPlanLine(line, { reference, transactions, asOf, accounts: settings.accounts }) : null;
+      if (read && read.amount !== null) {
+        setDraft("");
+        emptyBox();
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        const plan = makePlan(read, asOf, "owner");
+        offerPlan(plan, `A new plan, as you wrote it. No money moves until you pay.${plan.setAside && plan.due !== NO_DATE ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`);
         return;
       }
     }

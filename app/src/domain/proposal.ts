@@ -39,7 +39,7 @@ import { figuresIn, parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
 import { emptyDraft, itemsFor } from "./entry";
 import { accountFor, type InterestCredit } from "./interestCredit";
-import { cashWallet, type Withdrawal } from "./withdrawal";
+import { cashAndFee, cashWallet, type Withdrawal } from "./withdrawal";
 import { billFor, describe as describeReceipt, walletFor, type WalletReceipt } from "./walletReceipt";
 import type { CardSlip } from "./cardSlip";
 import { fitItem } from "./onList";
@@ -814,9 +814,31 @@ export function readProposals(
     reference,
     asOf,
   ), context.withdrawals ?? [], reference, asOf), context.cardSlips ?? [], reference, asOf), context.walletReceipts ?? [], reference, asOf);
-  const filed = onCreditLine(checked, context.note ?? "", reference);
+  const filed = onCreditLine(withMachineFee(checked, reference), context.note ?? "", reference);
   const folded = pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference))));
   return { proposals: onTheirLists(folded, context.note ?? "", reference), refused, balances };
+}
+
+/**
+ * A withdrawal into Cash whose amount is the cash and the machine's fee
+ * together: the amount is the cash, the fee the fee. A receipt read whole
+ * with its fee beside it counted the fee twice, and one read with no fee
+ * put it into Cash (owner's receipts, 12 and 15 November 2026). A
+ * machine gives whole hundreds (`cashAndFee`); said on the card.
+ */
+function withMachineFee(proposals: readonly Proposal[], reference: ReferenceLists): Proposal[] {
+  const cash = cashWallet(reference.wallets);
+  return proposals.map((p) => {
+    const d = p.draft;
+    const withdrawn = d.flow === "Transfer" && cash !== "" && d.toWallet === cash && (d.status === "Withdrawn" || /\b(?:withdr[ae]w\w*|atm|cash ?out)\b/i.test(`${d.description} ${d.notes}`));
+    const split = withdrawn && d.amount !== null ? cashAndFee(d.amount) : null;
+    if (!split || (d.fee !== 0 && d.fee !== split.fee)) return p;
+    return {
+      ...p,
+      draft: { ...d, amount: split.cash, fee: split.fee },
+      adjustments: [...p.adjustments, `${pesos(d.amount ?? 0)} left ${d.fromWallet || "the account"}: ${pesos(split.cash)} of cash and a ${pesos(split.fee)} machine fee, since a machine gives whole hundreds. Change it if that is not so.`],
+    };
+  });
 }
 
 /**
@@ -1328,7 +1350,13 @@ export function checkAgainstReadings(proposals: readonly Proposal[], readings: r
     const fee = p.draft.fee ?? 0;
     if (amount === null || shown.has(amount) || typed.has(amount) || (fee > 0 && (shown.has(amount + fee) || shown.has(amount - fee)))) return p;
     const digits = String(amount % 100 === 0 ? amount / 100 : amount);
-    const matches = [...shown].filter((v) => v !== amount && String(v) === digits);
+    /*
+     * Never the card's own fee: a send with a small fee was "put right" to
+     * the fee's figure, read as the amount with its point moved (owner's
+     * receipt, 15 November 2026). A figure the reading
+     * already accounts for is not a second reading of the amount.
+     */
+    const matches = [...shown].filter((v) => v !== amount && v !== fee && String(v) === digits);
     if (matches.length !== 1) return notOnPaper(p, amount, shown);
     const right = matches[0]!;
     return {

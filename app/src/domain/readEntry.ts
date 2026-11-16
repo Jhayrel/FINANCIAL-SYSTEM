@@ -30,7 +30,7 @@ import { withoutPlanClause } from "./planClause";
 import { withDayWordsFixed } from "./typos";
 import { formatMedium } from "./dates";
 import { namesMoney, withoutTotals } from "./entryTotals";
-import { cashWallet } from "./withdrawal";
+import { cashAndFee, cashWallet } from "./withdrawal";
 import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
 import { payBackClauseAt, readBehalf, readDebtSentence, readPassThrough } from "./debtSentence";
@@ -1175,6 +1175,15 @@ export function readEntry(
   const intoCash =
     flow === "Transfer" && WITHDRAWING.test(text) && !destination && !leftYourAccounts && cashIn !== "" && source !== cashIn;
   if (intoCash) because.push(`Taken out as cash, so into ${cashIn}.`);
+  /*
+   * A machine gives whole hundreds, so a withdrawal's one figure with a few
+   * pesos over is the cash and the machine's fee together (`cashAndFee`).
+   * "You withdrew ... at BANCNET ATM", with a few pesos over, was a transfer of the whole
+   * figure, putting the fee into Cash as well (owner's chat, 12 November
+   * 2026). Only with no fee said, and said on the card.
+   */
+  const machine = intoCash && fee === 0 && amount !== null ? cashAndFee(amount) : null;
+  if (machine) because.push(`${formatMoney(amount ?? 0)} left ${source || "the account"}: ${formatMoney(machine.cash)} of cash and a ${formatMoney(machine.fee)} machine fee, since a machine gives whole hundreds. Change it if that is not so.`);
 
   const base: Draft = {
     ...emptyDraft(date),
@@ -1191,8 +1200,8 @@ export function readEntry(
               ? destination
               : ""
           : "",
-    amount,
-    fee,
+    amount: machine ? machine.cash : amount,
+    fee: machine ? machine.fee : fee,
     status:
       flow === "Transfer" && WITHDRAWING.test(text)
         ? "Withdrawn"

@@ -115,8 +115,10 @@ describe("a borrowing seen on both screens is one borrowing", () => {
 
   it("leaves the withdrawal alone, with no lender fee on it", () => {
     const out = read.proposals.find((p) => p.draft.description.includes("St.Louis"));
-    expect(out?.draft.fee).toBe(0);
-    expect(out?.draft.amount).toBe(51600);
+    // No lender fee from the credit line: only the machine's own, split out of the figure (a machine gives whole hundreds, 15 November 2026).
+    expect(out?.draft.fee).toBe(1600);
+    expect(out?.draft.amount).toBe(50000);
+    expect(out?.adjustments.join(" ")).not.toMatch(/lender|charge the lender/i);
   });
 });
 

@@ -118,6 +118,8 @@ export function rowWords(draft: Draft): string {
     (draft.flow === "Debt" && (draft.debtEffect === "draw" || draft.debtEffect === "collect")) ||
     // Money in from another of their own accounts, not yet named.
     (draft.flow === "Transfer" && draft.toWallet.trim() !== "" && draft.fromWallet.trim() === "");
+  // With no amount yet, the entry is named by what it was: "The row out, fare for classmate, 11 Nov" read as a form speaking (owner, 11 November 2026).
+  if (draft.amount === null || draft.amount <= 0) return `${what ? what.charAt(0).toUpperCase() + what.slice(1) : incoming ? "Money in" : "Money out"}, ${day(draft.date)}`;
   return `${amount} ${incoming ? "in" : "out"}, ${what ? `${what}, ` : ""}${day(draft.date)}`;
 }
 

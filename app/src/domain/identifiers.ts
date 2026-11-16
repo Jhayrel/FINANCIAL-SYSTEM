@@ -28,12 +28,22 @@ const MASKED = /[\dx]*[*•]{2,}[\dx*•]*|\b\d+x{2,}[\dx]*\b/gi;
 /** Ten or more digits together: a phone, an account or a reference, never an amount. */
 const LONG_RUN = /(?<![\d.,])\d{10,}(?![\d.,]*\d)/g;
 
+/**
+ * "Balance: PHP 640.25", "Available balance is 1,200.00", "New balance PHP
+ * 85.00": what the account held after, never a movement. A pasted "You
+ * withdrew ... Balance: ..." made a second card out of the balance (owner's
+ * chat, 12 November 2026). Only in a pasted confirmation, which is where
+ * this is used; the figures here are invented.
+ */
+const BALANCE_AFTER = /\b(?:(?:new|available|remaining|current|running|ending|your)\s+)*bal(?:ance)?\.?\s*(?:after|now|left)?\s*(?:is|was|of|:|=)?\s*(?:php|₱|p)?\s*\d[\d,]*(?:\.\d{1,2})?/gi;
+
 /** The text with every identifier blanked out, so no figure is read from one. */
 export function withoutIdentifiers(text: string): string {
-  return text.replace(NAMED_ID, " ").replace(ACCOUNT_ID, " ").replace(MASKED, " ").replace(LONG_RUN, " ");
+  return text.replace(NAMED_ID, " ").replace(ACCOUNT_ID, " ").replace(MASKED, " ").replace(LONG_RUN, " ").replace(BALANCE_AFTER, " ");
 }
 
 /** Whether the text carries one: a pasted confirmation, rather than something typed. */
 export function carriesIdentifier(text: string): boolean {
-  return withoutIdentifiers(text) !== text;
+  return text.replace(NAMED_ID, " ").replace(ACCOUNT_ID, " ").replace(MASKED, " ").replace(LONG_RUN, " ") !== text;
 }
+
