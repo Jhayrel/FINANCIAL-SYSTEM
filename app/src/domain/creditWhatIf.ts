@@ -73,14 +73,22 @@ function amountSaid(text: string): Centavos | null {
 export function readCreditWhatIf(text: string, debts: readonly Debt[], asOf: IsoDate): CreditWhatIf | null {
   if (!SUPPOSE.test(text) || !ON_CREDIT.test(text)) return null;
   const lines = debts.filter((d) => !d.archived && d.kind === "payable" && d.form !== "pass-through" && d.billingDay !== undefined);
-  const debt =
-    [...lines]
-      .sort((a, b) => b.name.length - a.name.length)
-      .find((d) => [d.name, d.counterparty].map((w) => w.trim()).filter((w) => w.length >= 4).some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text) && (w !== d.counterparty.trim() || /\bcredit\b/i.test(text)))) ?? null;
+  const names = (d: Debt, said: string): boolean =>
+    [d.name, d.counterparty].map((w) => w.trim()).filter((w) => w.length >= 4).some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(said) && (w !== d.counterparty.trim() || /\bcredit\b/i.test(said)));
+  const debt = [...lines].sort((a, b) => b.name.length - a.name.length).find((d) => names(d, text)) ?? null;
   if (!debt) return null;
-  const amount = amountSaid(text);
+  /*
+   * The amount and the day from the sentence that puts it on the line. In a
+   * message of fifteen questions, "₱70 I planned" and "until November 30"
+   * from the gym question were read as the borrowing (16 November 2026
+   * replay of the owner's notes), where it said "₱2,000 ... on Maya Credit
+   * on November 25".
+   */
+  const sentences = text.split(/(?<=[.?!])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const said = sentences.find((x) => ON_CREDIT.test(x) && names(debt, x) && amountSaid(x) !== null) ?? text;
+  const amount = amountSaid(said);
   if (amount === null) return null;
-  return { debt, amount, on: daySaid(text, asOf) };
+  return { debt, amount, on: daySaid(said, asOf) };
 }
 
 export interface CreditOutcome {

@@ -552,7 +552,15 @@ export function asksRatherThanTells(said: string): boolean {
   const opinion =
     /\b(?:should i|should we|shall i|what if|would it be|is it (?:good|ok|okay|wise|better|enough|realistic|smart|too)|is that (?:good|ok|okay|enough|realistic)|do you think|good idea|too (?:much|little|low|high)|worth it|makes sense|wise to|dapat ba|pwede ba|how (?:can|could|should|do|would) i|(?:this is a |it'?s a |a )?question)\b/.test(t) ||
     // "if I received my salary ... how can I budget it": what if, not what to set (2 October 2026).
-    /^\s*(?:if|kung)\s+(?:i|ako)\b/.test(t);
+    /^\s*(?:if|kung)\s+(?:i|ako)\b/.test(t) ||
+    /*
+     * "so can we make my emergency fund higher? like in case of emergency"
+     * was read as editing a saved entry (owner's note of 12 November 2026,
+     * replayed 16 November), and "let me know if we can higher up the
+     * budget" made a budget card (17 November: "Thats Question").
+     */
+    (/\b(?:can|could)\s+(?:we|i)\b/.test(t) && /\?/.test(t)) ||
+    /\blet\s+me\s+know\s+(?:if|whether)\b|\btell\s+me\s+(?:if|whether)\b/.test(t);
   return opinion && !polite;
 }
 

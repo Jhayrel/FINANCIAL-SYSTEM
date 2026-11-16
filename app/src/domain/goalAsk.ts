@@ -51,7 +51,14 @@ export function readGoalAsk(text: string, asOf: IsoDate): GoalAsk | null {
    * A target keeps its own words: by, until, how long, a goal of.
    */
   if (/\b(?:i'?m|i\s+am|im)\s+(?:planning|going)\s+to\s+save\b|\b(?:i|we)\s+(?:plan|will|intend)\s+(?:to\s+)?save\b|\b(?:i|we)'ll\s+save\b|\bsave\b[^.?!]{0,30}\bwhen\s+(?:my\s+)?(?:salary|sahod|sweldo|allowance|income|pay(?:check)?)\b|\bsave\b[^.?!]{0,30}\b(?:from|out\s+of)\s+(?:my\s+)?(?:salary|sahod|sweldo|allowance|income|pay(?:check)?)\b/i.test(t) && !/\b(?:by|until|before|within|how\s+long|how\s+many|goal\s+of|target)\b/i.test(t)) return null;
-  const figure = /(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:days?|weeks?|months?|years?|%))/i.exec(withoutYears(t));
+  /*
+   * What cutting something would save is a question about the cut, not a
+   * target to save towards: "which 2 items should I cut first and how much
+   * would I save?" was answered "about 1 month to save ₱2.00" (16 November
+   * 2026 replay of the owner's notes). Nor is a count a figure: 2 items.
+   */
+  if (/\b(?:cut|cutting|drop|dropping|stop|stopping|skip|skipping|reduce|remove|lessen|bawas)\b/i.test(t) && /\bhow\s+much\s+(?:would|will|could|can|do|does)\s+(?:i|it|that|we)\s+save\b/i.test(t)) return null;
+  const figure = /(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:days?|weeks?|months?|years?|%|items?|things?|kinds?|categor(?:y|ies)|times?|entries|entry|people|persons?|sessions?|pcs|pieces?|of\s+them))/i.exec(withoutYears(t));
   if (!figure?.[1]) return null;
   const base = parseAmount(figure[1]);
   if (base === null || base <= 0) return null;

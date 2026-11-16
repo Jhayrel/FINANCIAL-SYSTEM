@@ -3675,6 +3675,47 @@ outstanding with fees, latest bill PHP 0.00 due 21 November).
     (`debtSentence.ts` `ASKED_TO_PASS`); "I sent 500 to my mom to give to my
     aunt" is still the owner's own money going out. `heldToGive.test.ts`.
 
+### 2026-11-17: the owner's "//" notes replayed, and a sum the check passed
+
+All 212 notes were replayed on the device alone (the AI blocked, as on a day
+it is down): what was typed just before each note, and what the app says
+now. 142 answered on the device, 44 need the model, 25 had no message or a
+picture. What still came back wrong, fixed:
+
+- **Borrowing, said the owner's way** (`debtSentence.ts`, `readEntry.ts`).
+  "i credit 1000 today", "credited 2000 on maya credit", "I acquire a debt
+  at maya credit 5000 to be paid soon" (was a payment: "to be paid" read as
+  paying), "I recieved 2000 from maya credit" and "the credit is from maya
+  credit" (both left what it does to pick) are borrowing. Paying still to
+  come is not paying. Cashback or a salary "credited" is still income.
+  `creditSaid.test.ts`; `creditLine.test.ts` now expects the received one
+  as borrowing.
+- **A line renamed in Settings** keeps the id it was made with; a card for
+  it by name pointed at no line. `fillDebt` matches it (`debtFill.ts`).
+- **"how much did I spend today and on what?"** said no entry says "what".
+  It lists the day (`spendAsk.ts`).
+- **"which 2 items should I cut first and how much would I save?"** was
+  "about 1 month to save ₱2.00". A cut is not a target and a count is not a
+  figure (`goalAsk.ts`).
+- **Three bill amounts typed as a list** ("999, 199, 239") became one
+  nine-digit amount on a card. A comma with a space after it, or digits
+  with a space between, is a list (`money.ts` `parseAmount`).
+- **"so can we make my emergency fund higher?"** was an edit of a saved
+  entry; **"let me know if we can higher up the budget"** (17 November) was
+  a budget card. "can we ...?" and "let me know if" ask (`budgetAsk.ts`
+  `asksRatherThanTells`, `incomeBudget.ts` `readIncomePlan`).
+- **A borrowing supposed in a long message** took its figure and day from
+  the gym question before it. They come from the sentence that names the
+  line (`creditWhatIf.ts`).
+- **A sum the model says it did is worked out** (`sumCheck.ts`, `useAi.ts`).
+  The owner's screenshot: safe to spend "added to" what was already spent
+  "makes" the most the budget can be, checked "all 8 figures match your
+  records", and asked to recalculate it said the same. The two do not make
+  that total; it also holds the money kept for allocations. A wrong sum is
+  said under the answer, and the model is asked once to redo it, the second
+  answer kept only if its sums add up.
+- `notesReplay16.test.ts` holds the rest.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

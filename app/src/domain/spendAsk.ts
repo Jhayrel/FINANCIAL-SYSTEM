@@ -145,7 +145,13 @@ function readSpendAskOf(said: string, items: readonly string[], asOf: IsoDate): 
    * (27 October 2026 sweep); shoes are filed under Online Buy or Clothes, and
    * the description says shoes. More than two words is not a thing.
    */
-  if (!item && after?.[1]) {
+  /*
+   * "how much did I spend today and on what?": the day's total and a list of
+   * it. "what" was taken for a thing the entries say, and nothing says it
+   * (16 November 2026 replay of the owner's notes).
+   */
+  const onWhat = /\b(?:on|for)\s+what(?:\s+things?)?\s*[?.!]*\s*$/i.test(text) || /\band\s+(?:on\s+)?what\s*[?.!]*\s*$/i.test(text);
+  if (!item && after?.[1] && !onWhat) {
     const named = after[1].trim().toLowerCase();
     const period = /^(?:the\s+)?(?:last|this|past|whole|entire|all|everything|today|yesterday|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|week|month|year|20\d{2})\b/;
     if (!period.test(named)) {
@@ -177,7 +183,7 @@ function readSpendAskOf(said: string, items: readonly string[], asOf: IsoDate): 
   }
   // One day by its weekday, "2 days ago" or "the 23rd": that day, not the days up to it (26 October 2026).
   const oneDay = dayFromWords(said, asOf);
-  const list = /\bwhat (?:did|have) i (?:buy|bought|purchase|pay for)\b/i.test(text);
+  const list = onWhat || /\bwhat (?:did|have) i (?:buy|bought|purchase|pay for)\b/i.test(text);
   if (oneDay && !/\b(?:since|from|until|to|hanggang)\b/i.test(text)) return withWord({ item, from: oneDay, to: oneDay, name: dayInWords(oneDay), list: true });
   const span = daysIn(text, asOf);
   if (span) return withWord({ item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}`, ...(list ? { list } : {}) });

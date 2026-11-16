@@ -416,7 +416,12 @@ export function readIncomePlan(text: string): IncomePlanAsk | null {
    * recommendation, and "add that" put November's figures on October
    * (19 October 2026).
    */
-  if ((income === null || income <= 0) && keep === null && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any)\b/i.test(t)) return null;
+  /*
+   * Asked without a question mark: "Based on current balance and income let
+   * me know if we can higher up the budget this month" was a budget card
+   * (owner, 17 November 2026: "Thats Question").
+   */
+  if ((income === null || income <= 0) && keep === null && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any|let\s+me\s+know|tell\s+me|can\s+(?:we|i)|could\s+(?:we|i)|whether|if\s+(?:we|i)\s+can|is\s+it|do\s+you\s+think|possible)\b/i.test(t)) return null;
   return { income: income !== null && income > 0 ? income : null, keep };
 }
 

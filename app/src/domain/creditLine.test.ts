@@ -156,12 +156,17 @@ describe("the credit line the sentence named", () => {
    * Maya Credit" say it outright. "Paid with Maya Credit" says the opposite
    * of paying it, and a sentence without a plain verb says nothing, so those
    * two are still left for the owner to pick.
+   *
+   * Money received from the line says it too (16 November 2026, the owner's
+   * notes replayed): "I recived it in maya and the credit is from maya
+   * credit" can only be borrowing, and leaving it to pick asked again what
+   * the sentence had said.
    */
   it("reads what the movement does only from a plain verb", () => {
     expect(read("I borrowed 2000 on maya credit into gcash").draft.debtEffect).toBe("draw");
     expect(read("I paid my maya credit 1000 from gcash").draft.debtEffect).toBe("repay");
     expect(read("I paid 500 for food using maya credit").draft.debtEffect).toBeUndefined();
-    expect(read("I recived it in maya and the credit is from maya credit").draft.debtEffect).toBeUndefined();
+    expect(read("I recived it in maya and the credit is from maya credit").draft.debtEffect).toBe("draw");
   });
 
   it("leaves it blank when no line was named", () => {

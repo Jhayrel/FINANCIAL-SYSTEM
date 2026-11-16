@@ -15,6 +15,7 @@
  *     walks 441 rows.
  */
 
+import { sumNote } from "../domain/sumCheck";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
@@ -368,7 +369,13 @@ export function useAi({
       // Every figure an answer states that anyone would rely on: the same rule `untracedFigures` reads by.
       const statedFigures = (text: string): number => new Set(figuresIn(text).map(Math.abs).filter((f) => !(f < 10_000 && f % 100 === 0))).size;
       const day = context.safe ? { today: toCentavos(context.safe.today), after: toCentavos(context.safe.perDayAfter) } : null;
-      const daySlip = (text: string): string => (task === "chat" && day ? fitNote(text, day, formatMoney) : "");
+      /*
+       * A sum said in words that does not add up is said too: each figure can
+       * be real and the sum between them wrong (owner, 17 November 2026,
+       * `sumCheck.ts`).
+       */
+      const daySlip = (text: string): string =>
+        [task === "chat" && day ? fitNote(text, day, formatMoney) : "", task === "chat" ? sumNote(text) : ""].filter(Boolean).join("\n\n");
       /*
        * One second look, when figures the app did not work out remain
        * (Chain-of-Verification, Dhuliawala et al., 2023: draft, check, then
@@ -386,10 +393,15 @@ export function useAi({
        * flagged, a sample budget the owner asked for read as a list of
        * mistakes (10 November 2026). Their sums are still worked out here.
        */
-      const revising = !options.madeUp && task === "chat" && settled.loose.length > 0 && Boolean(options.question) && Boolean(options.onRevised) && !options.signal?.aborted;
+      const wrongSum = !options.madeUp && task === "chat" ? sumNote(settled.text) : "";
+      const revising = !options.madeUp && task === "chat" && (settled.loose.length > 0 || wrongSum !== "") && Boolean(options.question) && Boolean(options.onRevised) && !options.signal?.aborted;
       if (revising && options.onRevised) {
         const first = settled.loose.length;
         const list = settled.loose.map((c) => formatMoney(c)).join(", ");
+        const told = [
+          first > 0 ? `a first answer to this used ${list}, which the app did not work out. Use only figures from the data` : "",
+          wrongSum ? `${first > 0 ? "and " : "a first answer to this said a sum that does not add up: "}${wrongSum.replace(/^A sum in this answer does not add up: /, "")} Say what every figure in a total is made of` : "",
+        ].filter(Boolean).join(", ");
         const onRevised = options.onRevised;
         void (async () => {
           try {
@@ -400,7 +412,7 @@ export function useAi({
               provider: ai.provider,
               model: ai.model,
               ...(withWorked ? { contextText: withWorked } : {}),
-              question: `${options.question}\n\n(Before you answer: a first answer to this used ${list}, which the app did not work out. Use only figures from the data, and write any sum the app did not work out as {{calc: ...}} so the app works it out.)`,
+              question: `${options.question}\n\n(Before you answer: ${told}, and write any sum the app did not work out as {{calc: ...}} so the app works it out.)`,
               ...(options.history ? { history: options.history } : {}),
               ...(options.earlier ? { earlier: options.earlier } : {}),
               ...(options.signal ? { signal: options.signal } : {}),
@@ -408,7 +420,9 @@ export function useAi({
             });
             if (again.source !== "model" || options.signal?.aborted) return onRevised(null);
             const second = settle(options.tidy ? options.tidy(again.text) : again.text);
-            if (second.loose.length >= first || !second.text.trim()) return onRevised(null);
+            // Better only: fewer figures the app cannot trace, and no sum left wrong when one was.
+            const fixedSum = wrongSum !== "" && sumNote(second.text) === "";
+            if (!second.text.trim() || second.loose.length > first || (second.loose.length === first && !fixedSum) || (wrongSum !== "" && !fixedSum)) return onRevised(null);
             if (options.checkApart) return onRevised({ ...again, text: second.text, checked: { figures: statedFigures(second.text), loose: second.loose, slip: daySlip(second.text) } });
             const left = untracedNote(second.text, given, formatMoney, second.worked);
             onRevised({ ...again, text: left ? `${second.text}\n\n${left}` : second.text });

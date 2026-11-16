@@ -111,9 +111,22 @@ const LEND_VERB = /\b(lent|lend|lending|loaned (?:it |the money )?to|pinautang|n
 const COLLECT_VERB =
   /\b(paid me back|paid back to me|gave (?:it |the money |my money )?back|returned (?:the |my )?(?:money|loan|utang)|collected|nagbayad sa akin|binayaran (?:ako|niya|nya)|ibinalik)\b/i;
 
-/** Money taken from a credit line or a lender. */
+/**
+ * Money taken from a credit line or a lender.
+ *
+ * Also as the owner says it (17 November 2026): "i credit 1000 today then
+ * paid then credited again", and "I acquire a debt at maya credit 5000",
+ * which was read as paying it because of "to be paid soon". And money
+ * received from a credit line: "I recieved 2000 from maya credit", "I
+ * recived it in maya and the credit is from maya credit" left what it does
+ * to pick.
+ */
 const BORROW_VERB =
-  /\b(?:borrowed|borrow|borrowing|loaned|nangutang|umutang|inutang|took\s+(?:a\s+)?loan|drew\s+from)\b/i;
+  /\b(?:borrowed|borrow|borrowing|loaned|nangutang|umutang|inutang|took\s+(?:out\s+)?(?:a\s+)?loan|took\s+out|drew\s+from|acquired?\s+(?:a\s+|the\s+)?(?:debt|loan|credit)|got\s+(?:a\s+)?(?:loan|credit)|availed(?:\s+of)?|(?:i|ako)\s+(?:just\s+|already\s+|also\s+)?credit(?:ed)?(?=\s+(?:again\b|(?:₱|php\s*)?\d))|credited\s+(?:again\s+)?(?:₱|php\s*)?\d|(?:received|recieved|recived|receive|got)\b[^.]{0,40}?\bfrom\s+(?:my\s+|the\s+)?(?:[a-z]+\s+)?(?:credit|loan|paylater|spaylater)\b|\bthe\s+credit\s+(?:is|was|came)\s+from\b)/i;
+
+/** Paying said as what comes later, not as done: "to be paid soon", "to pay next month". */
+const PAY_LATER =
+  /\b(?:to\s+be\s+paid|to\s+pay(?:\s+it)?(?:\s+back)?\s+(?:later|soon|next\s+\w+|on\s+\w+|by\s+\w+)|will\s+(?:be\s+)?pa(?:y|id)(?:\s+back)?(?:\s+(?:later|soon|next\s+\w+|on\s+\w+|by\s+\w+))?|payable)\b/gi;
 
 /** A fee the lender adds, by any of the names lenders give them. */
 const FEE_WORD = String.raw`(?:service\s+fees?|processing\s+fees?|convenience\s+fees?|late\s+(?:payment\s+)?(?:fees?|charges?)|finance\s+charges?|documentary\s+stamp\s+tax|stamp\s+tax|dst|penalty|penalties|fees?|charges?)`;
@@ -198,14 +211,16 @@ export function readDebtSentence(
   const principal = principalMatch?.[1] ? readFigure(principalMatch[1]) : null;
   const rest = amountOf(without);
 
-  const paying = PAY_VERB.test(text) && !PAID_WITH.test(text);
   const borrowing = BORROW_VERB.test(text);
+  // Paying still to come is not paying: only with a borrowing, so "will pay 500" alone stays a payment.
+  const payWords = borrowing ? text.replace(PAY_LATER, " ") : text;
+  const paying = PAY_VERB.test(payWords) && !PAID_WITH.test(payWords);
 
   /*
    * A borrowing with fees or interest named beside it: the money received,
    * and everything named as added to what is owed.
    */
-  if (borrowing && !PAY_VERB.test(text)) {
+  if (borrowing && !PAY_VERB.test(payWords)) {
     const added = (fees.total ?? 0) + (stated ?? 0);
     return {
       effect: "draw",

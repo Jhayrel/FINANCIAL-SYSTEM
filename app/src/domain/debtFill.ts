@@ -109,6 +109,16 @@ export function fillDebt(
   let next = draft;
   let newPerson: string | undefined;
 
+  /*
+   * A line the reader named by its name, as an id made from that name. A
+   * line renamed in Settings keeps the id it was made with, so that id named
+   * no line and the card showed none picked. Matched to the line it means.
+   */
+  if (next.debtId && !debts.some((d) => d.id === next.debtId)) {
+    const byName = debts.find((d) => makeDebtId(d.name) === next.debtId);
+    next = byName ? { ...next, debtId: byName.id } : { ...next, debtId: undefined };
+  }
+
   if (!next.debtId) {
     const person = personIn(text, [...accounts, ...live.filter((d) => d.counterpartyType !== "person").map((d) => d.name)]);
     const named = (d: Debt): boolean => {

@@ -162,8 +162,11 @@ const INTEREST_EARNED =
  * money arriving, and "bank interest credited to maya" is income rather than
  * borrowing. It is only debt when the owner is the one doing the crediting,
  * which is what "I credited" says and what "credited to" does not.
+ *
+ * "I credit" too, with a figure or "again" after it, as the owner says it
+ * (17 November 2026: "i credit 1000 today then paid then credited again").
  */
-const CREDITED_MYSELF = /\b(?:i|we)\s+(?:just\s+)?credited\b/i;
+const CREDITED_MYSELF = /\b(?:i|we)\s+(?:just\s+|already\s+|also\s+)?(?:credited\b|credit(?=\s+(?:again\b|(?:₱|php\s*)?\d)))/i;
 
 /**
  * Someone else, rather than another of your own pockets.

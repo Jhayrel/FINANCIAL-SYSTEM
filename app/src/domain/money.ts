@@ -78,6 +78,14 @@ export function parseAmount(input: string | number | null | undefined): Centavos
     return Number.isFinite(input) ? toCentavos(input) : null;
   }
 
+  /*
+   * A comma with a space after it, or digits with a space between, is a
+   * list, never one figure: "999, 199, 239" came back as PHP 999,199,239.00
+   * on a card that took it as the amount (16 November 2026 replay of the
+   * owner's notes). Only a comma right before three digits groups thousands.
+   */
+  if (/\d\s*,\s+\d|\d\s+\d/.test(input)) return null;
+
   const cleaned = input
     .replace(/[₱P]/gi, "")
     /*
