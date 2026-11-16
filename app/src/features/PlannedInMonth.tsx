@@ -250,8 +250,8 @@ export function PlannedInMonth({
       {undated.length > 0 && (
         <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
           <span>
-            Not in any month yet, with no date: {undated.slice(0, 4).map((v) => `${v.plan.title} ${formatMoney(v.left)}`).join(", ")}
-            {undated.length > 4 ? `, and ${undated.length - 4} more` : ""}. Give {undated.length === 1 ? "it" : "each"} a month on the Planner and it counts there.
+            {/* One line: the names and figures were a paragraph under every month (owner, 17 November 2026: "heavy text"). */}
+            {undated.length === 1 ? `1 plan has no month yet (${formatMoney(undated[0]!.left)}): give it one on the Planner to count it.` : `${undated.length} plans have no month yet (${formatMoney(undated.reduce((s, v) => s + v.left, 0))}): give each one on the Planner to count it.`}
           </span>
         </p>
       )}

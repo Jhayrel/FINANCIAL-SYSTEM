@@ -91,7 +91,7 @@ import type { Debt } from "../domain/debt";
 import { limitable } from "../domain/kinds";
 import { cashFlow } from "../domain/forecast";
 import type { MonthOutlook } from "../domain/outlook";
-import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { daysInMonth, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { PACE_FROM_DAY } from "../domain/alerts";
 import { budgetFromIncome, checkSplit, incomeBudget, overWords, WORTH_ADDING, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief, spendable } from "../domain/monthPlan";
@@ -537,7 +537,7 @@ export function Budget({
       </div>
 
       {/* ── The month ────────────────────────────────────────────────────── */}
-      <div className="fms-budgettop">
+      <div className="fms-budgettop" data-bell="month">
         <Card
           title={`${name} ${year}`}
           subtitle={
@@ -649,10 +649,10 @@ export function Budget({
           })()}
 
           <div className="fms-budgetincome">
-            <Stat label="Came in" hint="Income, not counting starting balances">
+            <Stat label="Came in" hint="Income">
               <Money value={view.revenue} size="m" tone="var(--flow-revenue-text)" />
             </Stat>
-            <Stat label="Went out" hint="Everything the budget counts">
+            <Stat label="Went out" hint="All the budget counts">
               <Money value={a.combined.spent} size="m" tone="var(--flow-spending-text)" />
             </Stat>
             <Stat
@@ -667,7 +667,7 @@ export function Budget({
                 hint={
                   view.planShareOfIncome > 1
                     ? "The budget is more than what came in"
-                    : "Of what came in is budgeted to be spent"
+                    : "Of income, budgeted"
                 }
               >
                 <span className="t-num-m" style={{ color: "var(--ink)" }}>
@@ -767,10 +767,7 @@ export function Budget({
                   </p>
                 </div>
               ) : lock.state !== "closed" ? (
-                <p className="t-caption fms-planner-note fms-limitintro">
-                  Set a limit on any kind of spending, such as food or travel, within the spending budget.
-                  Bills are tracked one by one in their own card.
-                </p>
+                <p className="t-caption fms-planner-note fms-limitintro">Limits sit inside the spending budget.</p>
               ) : null}
 
             {limitNote && (
@@ -1402,17 +1399,12 @@ function Planner({
               <AmountInput value={bills} onChange={setBills} ariaLabel={`${name} bills and subscriptions budget`} />
               {s.bills.bills.length > 0 ? (
                 <>
-                  <div className="fms-planner-chips">
-                    <Button size="sm" onClick={() => setBills(s.bills.total)}>
-                      {name}'s bills, {formatMoney(s.bills.total)}
-                    </Button>
+                  <div className="fms-suggests">
+                    <Suggestion label={`${name}'s bills`} value={s.bills.total} onPick={() => setBills(s.bills.total)} hint={`${billNames}.`} />
                     {planned && planned.billsSubs > 0 && (
-                      <Button size="sm" onClick={() => setBills(s.bills.total + planned.billsSubs)}>
-                        With plans, {formatMoney(s.bills.total + planned.billsSubs)}
-                      </Button>
+                      <Suggestion label="With plans" value={s.bills.total + planned.billsSubs} onPick={() => setBills(s.bills.total + planned.billsSubs)} />
                     )}
                   </div>
-                  <p className="t-caption fms-planner-note">{billNames}.</p>
                 </>
               ) : (
                 <p className="t-caption fms-planner-note">No bills paid in the two months before to go by.</p>
@@ -1425,27 +1417,15 @@ function Planner({
               </span>
               <AmountInput value={spending} onChange={setSpending} ariaLabel={`${name} spending budget`} />
               {(s.spendingLastMonth !== null || s.spendingUsual !== null || (s.spendingKeepFifth ?? 0) > 0) && (
-                <div className="fms-planner-chips">
-                  {s.spendingLastMonth !== null && (
-                    <Button size="sm" onClick={() => setSpending(s.spendingLastMonth)}>
-                      Last month, {formatMoney(s.spendingLastMonth)}
-                    </Button>
-                  )}
-                  {s.spendingUsual !== null && (
-                    <Button size="sm" onClick={() => setSpending(s.spendingUsual)}>
-                      Usual, {formatMoney(s.spendingUsual)}
-                    </Button>
-                  )}
+                <div className="fms-suggests">
+                  {s.spendingLastMonth !== null && <Suggestion label="Last month" value={s.spendingLastMonth} onPick={() => setSpending(s.spendingLastMonth)} />}
+                  {s.spendingUsual !== null && <Suggestion label="Usual" value={s.spendingUsual} onPick={() => setSpending(s.spendingUsual)} />}
                   {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
-                    <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
-                      Keep 20% of income, {formatMoney(s.spendingKeepFifth)}
-                    </Button>
+                    <Suggestion label="Keep 20% of income" value={s.spendingKeepFifth} onPick={() => setSpending(s.spendingKeepFifth)} />
                   )}
                   {/* The usual month with what the Planner has for this one on top (27 October 2026). */}
                   {planned && planned.spending > 0 && s.spendingUsual !== null && (
-                    <Button size="sm" onClick={() => setSpending((s.spendingUsual ?? 0) + planned.spending)}>
-                      Usual + plans, {formatMoney(s.spendingUsual + planned.spending)}
-                    </Button>
+                    <Suggestion label="Usual + plans" value={s.spendingUsual + planned.spending} onPick={() => setSpending((s.spendingUsual ?? 0) + planned.spending)} />
                   )}
                 </div>
               )}
@@ -1454,13 +1434,13 @@ function Planner({
                   Planned in {name}: {planned.spendingViews.map((v) => `${v.plan.title} ${formatMoney(v.left)}`).join(", ")}.
                 </p>
               )}
-              <p className="t-caption fms-planner-note">
-                {limitsTotal > 0
-                  ? `Limits for kinds of spending inside it come to ${formatMoney(limitsTotal)}${
-                      (spending ?? 0) < limitsTotal ? ", more than this" : ""
-                    }.`
-                  : "Everything but bills: what you buy, money sent to other people, transfer fees and interest."}
-              </p>
+              {/* Said only when there is something to say: the line on what spending covers was read past every time (owner, 17 November 2026: "too much text"). */}
+              {limitsTotal > 0 && (
+                <p className="t-caption fms-planner-note">
+                  Limits for kinds of spending inside it come to {formatMoney(limitsTotal)}
+                  {(spending ?? 0) < limitsTotal ? ", more than this" : ""}.
+                </p>
+              )}
             </div>
 
             {/*
@@ -1479,9 +1459,7 @@ function Planner({
               .filter((t) => t.planned !== null && t.planned > 0 && t.done > t.planned)
               .map((t) => (
                 <p key={t.label} className="t-caption fms-planner-note fms-note-over" role="status">
-                  {name} has already spent {formatMoney(t.done)} on {t.label}, so this budget starts{" "}
-                  {formatMoney(t.done - (t.planned ?? 0))} over. It still saves, and the month will then read as over
-                  with nothing safe to spend.
+                  {formatMoney(t.done)} already spent on {t.label}: {formatMoney(t.done - (t.planned ?? 0))} over this figure.
                 </p>
               ))}
 
@@ -2023,6 +2001,20 @@ function Stat({ label, hint, children }: { label: string; hint: string; children
 }
 
 /**
+ * A figure to fill in with one tap: what it is above, the figure under it,
+ * every one the same size in an even grid (owner, 17 November 2026: "make it
+ * align"). Labelled with both, so a screen reader says what it fills.
+ */
+function Suggestion({ label, value, onPick, hint }: { label: string; value: Centavos; onPick: () => void; hint?: string }) {
+  return (
+    <Button size="sm" onClick={onPick} ariaLabel={`${label}, ${formatMoney(value)}`} {...(hint ? { title: hint } : {})}>
+      <span className="fms-suggest-label">{label}</span>
+      <Money value={value} size="s" />
+    </Button>
+  );
+}
+
+/**
  * The budget against the money, and the money that came in since it was set
  * (`domain/incomeBudget.ts`). Four figures, one sentence, one button; the
  * split appears only when there is new money to split, and says nothing is
@@ -2062,43 +2054,67 @@ function IncomeSplitCard({
   const split = { toSpending: toSpending ?? 0, toBills: toBills ?? 0, keepAside: keepAside ?? 0 };
   const check = checkSplit(view, split);
   const typed = toSpending !== null || toBills !== null || keepAside !== null;
-  const since = view.setOn ? `since you set the budget on ${formatMedium(view.setOn)}` : `in ${monthName}`;
+  const sinceShort = view.setOn ? `since ${shortDay(view.setOn)}` : `in ${monthName}`;
+  // What the wallets hold for allocations: the part of the most that is neither spent, safe to spend nor plans. Below zero, savings kept back.
+  const held = view.most - view.spent - view.safe - view.plans;
   return (
-    <section className="fms-incomesplit" aria-label="Budget and your money">
+    <section className="fms-incomesplit" aria-label="Budget and your money" data-bell="money">
       {dialog}
       <h3 className="t-label" style={{ color: "var(--ink-2)", margin: 0 }}>
         Budget and your money
       </h3>
-      <dl className="fms-rowfacts">
+      {/*
+        A sum that adds up on the screen: spent, what the wallets still hold
+        for allocations and plans, and safe to spend make the most the
+        budget can be. Without the allocations line, safe to spend and spent
+        sat over a total they do not make, and the AI repeated the gap
+        (owner, 17 November 2026: "too much text ... make it align").
+      */}
+      <dl className="fms-rowfacts fms-moneysum">
         <div>
-          <dt>Safe to spend now</dt>
-          <dd>{formatMoney(view.safe)}</dd>
+          <dt>Spent this month</dt>
+          <dd><Money value={view.spent} size="s" /></dd>
         </div>
-        {/* Set aside in safe to spend, and still spending this budget pays: counted in the most it can be. */}
+        {held > 0 && (
+          <div>
+            <dt>Held for allocations</dt>
+            <dd><Money value={held} size="s" signed /></dd>
+          </div>
+        )}
         {view.plans > 0 && (
           <div>
             <dt>Set aside for plans</dt>
-            <dd>{formatMoney(view.plans)}</dd>
+            <dd><Money value={view.plans} size="s" signed /></dd>
           </div>
         )}
         <div>
-          <dt>Spent this month</dt>
-          <dd>{formatMoney(view.spent)}</dd>
+          <dt>Safe to spend now</dt>
+          <dd><Money value={view.safe} size="s" signed /></dd>
         </div>
-        <div>
+        {held < 0 && (
+          <div>
+            <dt>Kept for savings</dt>
+            <dd><Money value={held} size="s" /></dd>
+          </div>
+        )}
+        <div className="fms-moneysum-total">
           <dt>The most your budget can be</dt>
-          <dd>{formatMoney(view.most)}</dd>
+          <dd><Money value={view.most} size="s" /></dd>
         </div>
         <div>
           <dt>Your spending budget</dt>
-          <dd style={view.over > 0 ? { color: "var(--over)" } : undefined}>{formatMoney(view.budget)}</dd>
+          <dd><Money value={view.budget} size="s" tone={view.over > 0 ? "var(--over)" : undefined} /></dd>
         </div>
       </dl>
-      {view.over > 0 ? (
+      <p className="t-caption" role="status" style={{ color: view.over > 0 ? "var(--over)" : "var(--ink-2)", margin: 0 }}>
+        {view.over > 0
+          ? `${formatMoney(view.over)} more than your money can cover.`
+          : view.room > 0
+            ? `Fits your money, with ${formatMoney(view.room)} of room to raise it.`
+            : "Fits your money."}
+      </p>
+      {view.over > 0 && (
         <>
-          <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-            Your budget is {formatMoney(view.over)} more than the money you hold now can cover. {view.plans > 0 ? `Spent so far, plus the ${formatMoney(Math.max(0, view.most - view.spent))} the wallets can still pay this month (plans set aside included), is` : "Spent so far plus safe to spend is"} {formatMoney(view.most)}.
-          </p>
           {/*
             The 1st of the month, before the income has come: "Lower it to
             PHP 0.00" (owner's data, 1 November 2026). The usual month's
@@ -2123,22 +2139,49 @@ function IncomeSplitCard({
             Lower it to {formatMoney(view.most)}
           </Button>
         </>
-      ) : (
-        <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-          Your budget fits your money{view.room > 0 ? `, with room to raise it by ${formatMoney(view.room)}` : ""}.
-        </p>
       )}
-      {/* Into savings or a goal: savings growing, never offered to the budget (owner, 27 October 2026). */}
-      {view.intoSavings > 0 && (
-        <p className="t-caption" style={{ color: "var(--ink-3)", margin: 0 }}>
-          {formatMoney(view.intoSavings)} went into savings {since} ({view.savingsSources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")}): savings growing, not money to spend, so it stays out of the budget.
-        </p>
+      {/* What came in, as figures; where from, one tap away and whole (into savings: never offered to the budget, owner, 27 October 2026). */}
+      {(view.cameIn > 0 || view.intoSavings > 0) && (
+        <dl className="fms-rowfacts">
+          {view.cameIn > 0 && (
+            <div>
+              <dt>Came in {sinceShort}</dt>
+              <dd><Money value={view.cameIn} size="s" /></dd>
+            </div>
+          )}
+          {view.toSavings > 0 && (
+            <div>
+              <dt>Moved to savings since</dt>
+              <dd><Money value={view.toSavings} size="s" /></dd>
+            </div>
+          )}
+          {view.intoSavings > 0 && (
+            <div>
+              <dt>Into savings, kept out</dt>
+              <dd><Money value={view.intoSavings} size="s" /></dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {(view.sources.length > 0 || view.savingsSources.length > 0) && (
+        <details className="fms-moneysum-from">
+          <summary className="t-caption">Where it came from</summary>
+          <ul className="fms-moneysum-list">
+            {[...view.sources.map((x) => ({ ...x, into: "" })), ...view.savingsSources.map((x) => ({ ...x, into: "savings" }))].map((x, i) => (
+              <li key={`${x.date}-${x.name}-${i}`}>
+                <span className="t-caption">
+                  {x.name}
+                  <span style={{ color: "var(--ink-3)" }}>{`, ${shortDay(x.date)}${x.into ? ", into savings" : ""}`}</span>
+                </span>
+                <Money value={x.amount} size="s" />
+              </li>
+            ))}
+          </ul>
+          <p className="t-caption fms-planner-note">Savings never count in the budget.</p>
+        </details>
       )}
       {view.cameIn > 0 && view.cameIn < WORTH_ADDING && (
-        <p className="t-caption" style={{ color: "var(--ink-3)", margin: 0 }}>
-          {formatMoney(view.cameIn)} came into your wallets {since}
-          {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}: too little to change the budget for. It is in safe to spend already.
-        </p>
+        <p className="t-caption fms-planner-note">Too little to change the budget for: it is in safe to spend already.</p>
       )}
       {/*
         The budget above the money already: the income is counted in it, and
@@ -2148,21 +2191,12 @@ function IncomeSplitCard({
         want the bank to be savings, do not touch only if needed").
       */}
       {view.cameIn >= WORTH_ADDING && view.room <= 0 && (
-        <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-          {formatMoney(view.cameIn)} came into your wallets {since}
-          {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}. It is counted already: your budget is above what the wallets can still pay this month, so there is nothing to add.
-          {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} of your money went into savings since then; savings are never counted in the budget.` : ""}
-        </p>
+        <p className="t-caption fms-planner-note">Counted already: the budget is above what the wallets can pay, so there is nothing to add.</p>
       )}
       {view.cameIn >= WORTH_ADDING && view.room > 0 && (
         <>
-          <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-            {formatMoney(view.cameIn)} came into your wallets {since}
-            {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}.
-            {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} has gone into savings since then.` : ""} Savings are never counted: at most {formatMoney(Math.min(view.room, view.cameIn))} can go to the spending budget, what the wallets can still pay.
-          </p>
           {!splitting ? (
-            <Button onClick={() => setSplitting(true)}>Add this money to the budget</Button>
+            <Button onClick={() => setSplitting(true)}>Add up to {formatMoney(Math.min(view.room, view.cameIn))} to the budget</Button>
           ) : (
             <>
               <div className="fms-planner-field">

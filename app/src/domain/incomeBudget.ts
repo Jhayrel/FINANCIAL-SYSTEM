@@ -48,7 +48,7 @@ export interface IncomeBudget {
    * spent, so money a budget can grow by.
    */
   readonly cameIn: Centavos;
-  /** The largest of it, for the words. */
+  /** Each of it, largest first. `someOf` names the first few and says what the rest come to. */
   readonly sources: readonly { readonly name: string; readonly amount: Centavos; readonly date: IsoDate }[];
   /**
    * Income that landed in savings or a goal instead: bank interest, mostly.
@@ -120,10 +120,10 @@ export function incomeBudget(input: {
   // Where it landed decides what it is: a spending wallet is money to spend; savings or a goal is savings growing.
   const usable = income.filter((t) => wallets.has(t.toWallet));
   const saved = income.filter((t) => !wallets.has(t.toWallet));
+  // Every one, largest first: a list of three under a total of more read as if they made it (owner, 17 November 2026).
   const named = (rows: readonly Transaction[]) =>
     [...rows]
       .sort((a, b) => incomeOf(b) - incomeOf(a))
-      .slice(0, 3)
       .map((t) => ({ name: t.item.trim() || t.description.trim() || "Income", amount: incomeOf(t), date: t.date }));
   const cameIn = usable.reduce((sum, t) => sum + incomeOf(t), 0);
   const sources = named(usable);
@@ -254,6 +254,20 @@ export function mostWords(ib: Pick<IncomeBudget, "plans">): string {
   return ib.plans > 0 ? `spent, plus what the wallets can still pay this month, the ${formatMoney(ib.plans)} set aside for plans included` : "spent plus safe to spend";
 }
 
+/**
+ * The first few of a total's parts, and what the rest come to, so a list
+ * never reads as the whole: three bank interest rows under a total of more
+ * read as if they made it (owner's Budget screen, 17 November 2026).
+ */
+export function someOf(parts: readonly { readonly name: string; readonly amount: Centavos }[], total: Centavos, shown = 3, on?: (p: { readonly name: string; readonly amount: Centavos; readonly date?: IsoDate }) => string): string {
+  const first = parts.slice(0, shown);
+  const words = first.map((p) => (on ? on(p) : `${p.name} ${formatMoney(p.amount)}`));
+  const rest = total - first.reduce((sum, p) => sum + p.amount, 0);
+  const more = parts.length - first.length;
+  if (more > 0 && rest > 0) words.push(`${more} more, ${formatMoney(rest)}`);
+  return words.join(", ");
+}
+
 /** Less than this coming in is too little to change a budget for: said, never offered with a button. */
 export const WORTH_ADDING: Centavos = 10_000;
 
@@ -263,11 +277,11 @@ export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[]
   const since = ib.setOn ? `since the budget was last set on ${formatMedium(ib.setOn)}` : `in ${monthName}, with no budget saved for it yet`;
   out.push(
     ib.cameIn > 0
-      ? `Came in ${since}: ${formatMoney(ib.cameIn)}${ib.sources.length > 0 ? ` (${ib.sources.map((s) => `${s.name} ${formatMoney(s.amount)} on ${formatMedium(s.date)}`).join("; ")})` : ""}.`
+      ? `Came in ${since}: ${formatMoney(ib.cameIn)}${ib.sources.length > 0 ? ` (${someOf(ib.sources, ib.cameIn, 3, (s) => `${s.name} ${formatMoney(s.amount)}${s.date ? ` on ${formatMedium(s.date)}` : ""}`)})` : ""}.`
       : `Nothing has come in ${since}.`,
   );
   if (ib.intoSavings > 0)
-    out.push(`Went straight into savings ${since}, not money to spend and not for the budget: ${formatMoney(ib.intoSavings)} (${ib.savingsSources.map((s) => `${s.name} ${formatMoney(s.amount)}`).join("; ")}).`);
+    out.push(`Went straight into savings ${since}, not money to spend and not for the budget: ${formatMoney(ib.intoSavings)} (${someOf(ib.savingsSources, ib.intoSavings)}).`);
   if (ib.toSavings > 0) out.push(`Moved into savings since then: ${formatMoney(ib.toSavings)}.`);
   out.push(
     `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}${ib.plans > 0 ? `, after ${formatMoney(ib.plans)} set aside for plans` : ""}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (${mostWords(ib)}).`,

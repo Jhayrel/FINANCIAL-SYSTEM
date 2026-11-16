@@ -3716,6 +3716,47 @@ picture. What still came back wrong, fixed:
   answer kept only if its sums add up.
 - `notesReplay16.test.ts` holds the rest.
 
+### 2026-11-17, later: the bell, the Budget screen, and a statement of last month
+
+- **The bell acts like a phone's notifications** (`Notifications.tsx`,
+  `bellTarget.ts` `mustStay`, `newFirst`). The owner: "make it act like
+  notification like it can be clear or removed but if its important it
+  canot". As phones do (an ongoing notification is taken away by the app
+  that posted it, not swiped): **Clear** on each, **Clear all** with
+  **Undo**, a cleared one back only if its figures change ("N cleared",
+  Bring back). A wallet below zero, a bill past due or due today, a late
+  debt payment and a plan past its date say "Stays until dealt with" and
+  cannot be cleared. New ones are listed first with a dot; the detail is
+  two lines; "Open Budget" and the like under each.
+- **"The bell says 1 but there is nothing".** A saving notice counted on
+  the badge, and "Offline, 1 change waiting" comes and goes with the
+  connection. Only a failed save counts and is listed now; waiting and slow
+  saves stay in the corner notice.
+- **No note over the screen a notification opens** (`App.tsx`). "From the
+  bell: ..." repeated the notification over the screen and covered what it
+  pointed at ("it shows the notification as distraction"). The part it is
+  about is outlined for four seconds, then left as it was; a month-wide
+  budget finding outlines the month's own card (`data-bell`).
+- **Budget screen, less to read** (`Budget.tsx`, `Allocations.tsx`,
+  `PlannedInMonth.tsx`). "Budget and your money" is a sum that adds up:
+  spent, held for allocations, plans, safe to spend, then the most the
+  budget can be under a 2px rule; one status line; what came in as rows;
+  where it came from behind one tap, every source listed. Suggested figures
+  are an even grid of tiles. The paragraphs on what spending covers, a
+  budget set below what is spent, plans with no month and limits are one
+  line each or gone. An allocation's week is one line ("This week, Nov 15
+  to Nov 21: ... left of ...").
+- **A short list under a total says what the rest come to** (`someOf`):
+  three names under a total of more read as the whole of it.
+- **"Generate a statement of spending last month only"** came back as
+  made-up figures: "generate" with "spending" read as a request to invent.
+  A statement, report, export or "my" is the owner's own records. **"Pdf"**
+  after it made January to today; it now takes the statement just asked for
+  (October's spending).
+- **"Can you check if that number is accurate"** after a budget card asked
+  which account to check. It works the card's figure out: spent, held for
+  allocations, plans, safe to spend.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

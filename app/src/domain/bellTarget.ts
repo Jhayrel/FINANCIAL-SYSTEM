@@ -49,3 +49,27 @@ export function prunedHidden(findings: readonly { readonly id: string; readonly 
   const live = new Map(findings.map((f) => [f.id, sayingOf(f)]));
   return Object.fromEntries(Object.entries(hidden).filter(([id, saying]) => live.get(id) === saying));
 }
+
+/**
+ * A notification that stays until what it says is dealt with: it cannot be
+ * cleared, only resolved, as a phone keeps an ongoing notification until the
+ * app that posted it takes it away.
+ *
+ * The owner, 17 November 2026: "make it act like notification like it can be
+ * clear or removed but if its important it canot". Money already gone wrong
+ * or due today: a wallet below zero, a bill past due or due today, a debt
+ * payment late, a plan past its date. Everything else is cleared with Clear,
+ * and comes back only if its figures change.
+ */
+export function mustStay(finding: { readonly id: string; readonly level: "over" | "warn" | "info" }): boolean {
+  const id = finding.id;
+  if (id === "bills-overdue" || id === "bills-today") return true;
+  if (id.startsWith("negative-") || id.startsWith("plan-overdue-")) return true;
+  if (id.startsWith("debt-") && !id.startsWith("debt-below-zero-")) return finding.level === "over";
+  return false;
+}
+
+/** New ones first, each part kept in its own order (worst first), so the one the badge counted is the first seen. */
+export function newFirst<F extends { readonly id: string }>(findings: readonly F[], seen: ReadonlySet<string>): F[] {
+  return [...findings.filter((f) => !seen.has(f.id)), ...findings.filter((f) => seen.has(f.id))];
+}

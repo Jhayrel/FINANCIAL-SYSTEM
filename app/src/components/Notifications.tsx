@@ -20,7 +20,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { useBackToClose } from "../data/backButton";
 import { worstLevel, type Alert as Finding, type AlertArea, type AlertLevel } from "../domain/alerts";
-import { prunedHidden, sayingOf, splitHidden, type Hidden } from "../domain/bellTarget";
+import { mustStay, newFirst, prunedHidden, sayingOf, splitHidden, type Hidden } from "../domain/bellTarget";
 import type { SyncNotice } from "../domain/syncState";
 
 const SEEN_KEY = "fms.notify.seen";
@@ -48,15 +48,15 @@ const GLYPH: Record<AlertLevel, IconName> = { over: "statusOver", warn: "statusW
 
 /** What tapping a finding does, said on the finding. */
 const GO: Record<AlertArea, string> = {
-  budget: "View in Budget",
-  wallet: "View the entries",
-  bills: "Record it on Add",
-  debt: "View in Debt",
-  goals: "View in Settings",
-  settings: "View in Settings",
-  pattern: "View in Insights",
-  review: "Review in the Database",
-  planner: "View in the Planner",
+  budget: "Open Budget",
+  wallet: "Open the entries",
+  bills: "Record it",
+  debt: "Open Debt",
+  goals: "Open Settings",
+  settings: "Open Settings",
+  pattern: "Open Insights",
+  review: "Open Needs review",
+  planner: "Open the Planner",
 };
 
 function readSeen(): ReadonlySet<string> {
@@ -136,14 +136,41 @@ export function Notifications({
     writeHidden(next);
   };
 
+  /*
+   * The count is what the list holds and has not been looked at. A saving
+   * notice counts only when a save failed: "Offline, 1 change waiting" came
+   * and went with the connection, and the bell said 1 over a list with
+   * nothing new in it (owner, 17 November 2026: "the bell icon say 1 but if
+   * I click it nothing"). Waiting and slow saves stay in the corner notice.
+   */
+  const failed = status && status.level === "over" ? status : null;
   const unseen = shown.filter((a) => !seen.has(a.id));
-  // A problem with saving counts until it is put right, seen or not.
-  const worst = worstLevel(status && status.level !== "info" ? [...unseen, { level: status.level }] : unseen);
-  const count = unseen.length + (status && status.level !== "info" ? 1 : 0);
+  const worst = worstLevel(failed ? [...unseen, { level: failed.level }] : unseen);
+  const count = unseen.length + (failed ? 1 : 0);
+  const ordered = newFirst(shown, seen);
+  const clearable = shown.filter((a) => !mustStay(a));
+  // "Clear all", undone with one tap: what was cleared and when.
+  const [undo, setUndo] = useState<Hidden | null>(null);
+  const clearAll = (): void => {
+    if (clearable.length === 0) return;
+    setUndo(hidden);
+    const next = { ...prunedHidden(every, hidden), ...Object.fromEntries(clearable.map((a) => [a.id, sayingOf(a)])) };
+    setHidden(next);
+    writeHidden(next);
+  };
+  const undoClear = (): void => {
+    if (!undo) return;
+    setHidden(undo);
+    writeHidden(undo);
+    setUndo(null);
+  };
 
   // Opening the list is looking at it. Only the findings there now are kept.
+  // Read from the list as it opened, so the new ones stay marked while it is open.
+  const [openedSeen, setOpenedSeen] = useState<ReadonlySet<string>>(seen);
   useEffect(() => {
     if (!open || !settled) return;
+    setOpenedSeen(seen);
     const ids = alerts.map((a) => a.id);
     setSeen(new Set(ids));
     writeSeen(ids);
@@ -153,7 +180,15 @@ export function Notifications({
       if (Object.keys(kept).length !== Object.keys(h).length) writeHidden(kept);
       return Object.keys(kept).length === Object.keys(h).length ? h : kept;
     });
-  }, [open, alerts, settled]);
+    // Once for each opening: what was seen before it is what marks the new ones.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, settled]);
+  useEffect(() => {
+    if (!open) setUndo(null);
+  }, [open]);
+  const listed = open ? newFirst(shown, openedSeen) : ordered;
+  const isNew = (a: Finding): boolean => !(open ? openedSeen : seen).has(a.id);
+  const newCount = listed.filter(isNew).length;
 
   useEffect(() => {
     if (!open) return;
@@ -173,12 +208,10 @@ export function Notifications({
 
   const label =
     shown.length === 0
-      ? "Nothing needs attention"
-      : `${shown.length} thing${shown.length === 1 ? "" : "s"} need${shown.length === 1 ? "s" : ""} attention${
-          unseen.length > 0 ? `, ${unseen.length} new` : ""
-        }`;
+      ? "Notifications: nothing needs attention"
+      : `Notifications: ${shown.length}${count > 0 ? `, ${count} new` : ""}`;
   const goWords = (a: Finding): string =>
-    a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "View in Settings, Categories" : a.id.startsWith("debt-below-zero") ? "View on the Dashboard" : a.query ? "View the entries" : GO[a.area];
+    a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "Open Settings" : a.id.startsWith("debt-below-zero") ? "Open the Dashboard" : a.query ? "Open the entries" : GO[a.area];
 
   return (
     <div className="fms-notify" ref={box}>
@@ -200,45 +233,61 @@ export function Notifications({
       </button>
 
       {open && (
-        <div className="fms-notify-panel" role="dialog" aria-label="What needs attention">
+        <div className="fms-notify-panel" role="dialog" aria-label="Notifications">
           <div className="fms-notify-head">
             <span className="fms-notify-headtext">
-              <span className="t-body-strong">What needs attention</span>
-              {shown.length > 0 && (
-                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                  {shown.length}, worst first
-                </span>
+              <span className="t-body-strong">Notifications</span>
+              {newCount > 0 && (
+                <span className="t-micro fms-notify-newcount">{newCount} new</span>
               )}
             </span>
-            <button type="button" className="t-caption fms-notify-close" onClick={() => setOpen(false)}>
-              Close
-            </button>
+            <span className="fms-notify-headacts">
+              {clearable.length > 0 && (
+                <button type="button" className="t-caption fms-notify-close" onClick={clearAll}>
+                  Clear all
+                </button>
+              )}
+              <button type="button" className="t-caption fms-notify-close" onClick={() => setOpen(false)} aria-label="Close notifications">
+                Close
+              </button>
+            </span>
           </div>
 
-          {status && (
+          {undo && (
+            <div className="fms-notify-undo t-caption" role="status">
+              <span>Cleared. They come back if their figures change.</span>
+              <button type="button" className="t-caption fms-notify-close" onClick={undoClear}>
+                Undo
+              </button>
+            </div>
+          )}
+
+          {failed && (
             <div className="fms-notify-status" role="status">
-              <span aria-hidden className="fms-notify-glyph" style={{ color: `var(--${status.level === "info" ? "ink-3" : status.level})` }}>
-                <Icon name={GLYPH[status.level]} size={18} />
+              <span aria-hidden className="fms-notify-glyph" style={{ color: `var(--${failed.level})` }}>
+                <Icon name={GLYPH[failed.level]} size={18} />
               </span>
               <span className="fms-notify-text">
-                <span className="t-body-strong">{status.title}</span>
-                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                  {status.detail}
-                </span>
+                <span className="t-body-strong">{failed.title}</span>
+                <span className="t-caption fms-notify-detail">{failed.detail}</span>
               </span>
             </div>
           )}
 
-          {shown.length === 0 ? (
+          {listed.length === 0 ? (
             <p className="t-caption fms-notify-empty">
-              {away.length > 0
-                ? "Nothing new. Hidden items return here when their figures change."
-                : "Nothing right now. Bills, budgets, balances and debts are checked every time the ledger changes, and anything worth a look shows here."}
+              {away.length > 0 ? "All clear. Cleared items come back here if their figures change." : "All clear. Bills, budgets, balances and debts are checked each time the ledger changes."}
             </p>
           ) : (
             <ul className="fms-notify-list">
-              {shown.map((a) => (
-                <li key={a.id} className="fms-notify-row">
+              {/*
+                Short and alike: the title, two lines of the detail, then Open
+                and Clear. Long paragraphs per item made the list a page to
+                read (owner, 17 November 2026: "its ugly make it cleaner ui").
+                One that must stay says so where Clear would be.
+              */}
+              {listed.map((a) => (
+                <li key={a.id} className={isNew(a) ? "fms-notify-row fms-notify-row--new" : "fms-notify-row"}>
                   <button
                     type="button"
                     className="fms-notify-item"
@@ -253,19 +302,11 @@ export function Notifications({
                     <span className="fms-notify-text">
                       <span className="t-body-strong">
                         {a.title}
-                        {!seen.has(a.id) && <span className="t-micro fms-notify-new"> new</span>}
+                        {isNew(a) && <span className="fms-notify-dot" aria-label="new" />}
                       </span>
-                      <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                        {a.detail}
-                      </span>
+                      <span className="t-caption fms-notify-detail">{a.detail}</span>
                     </span>
                   </button>
-                  {/*
-                    Where it goes and Hide on one line under the words. Hide was a
-                    column of its own the height of the finding, with a rule down
-                    it, which took the width the words needed on a phone (owner,
-                    16 November 2026: "this is bad ui").
-                  */}
                   <div className="fms-notify-acts">
                     <button
                       type="button"
@@ -277,9 +318,13 @@ export function Notifications({
                     >
                       {goWords(a)}
                     </button>
-                    <button type="button" className="t-caption fms-notify-hide" onClick={() => hide(a)} aria-label={`Hide "${a.title}" until it changes`}>
-                      Hide
-                    </button>
+                    {mustStay(a) ? (
+                      <span className="t-micro fms-notify-stays">Stays until dealt with</span>
+                    ) : (
+                      <button type="button" className="t-caption fms-notify-hide" onClick={() => hide(a)} aria-label={`Clear "${a.title}"`}>
+                        Clear
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
@@ -288,8 +333,8 @@ export function Notifications({
 
           {away.length > 0 && (
             <div className="fms-notify-away">
-              <button type="button" className="t-micro fms-notify-awaytoggle" aria-expanded={showAway} onClick={() => setShowAway((v) => !v)}>
-                {showAway ? "Hide this list" : `Show ${away.length} hidden ${away.length === 1 ? "item" : "items"}. ${away.length === 1 ? "It returns" : "They return"} when the figures change.`}
+              <button type="button" className="t-caption fms-notify-awaytoggle" aria-expanded={showAway} onClick={() => setShowAway((v) => !v)}>
+                {showAway ? "Hide cleared" : `${away.length} cleared`}
               </button>
               {showAway && (
                 <ul className="fms-notify-list">
@@ -298,15 +343,13 @@ export function Notifications({
                       <span className="fms-notify-item fms-notify-item--away">
                         <span className="fms-notify-text">
                           <span className="t-body-strong">{a.title}</span>
-                          <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                            {a.detail}
-                          </span>
+                          <span className="t-caption fms-notify-detail">{a.detail}</span>
                         </span>
                       </span>
                       <div className="fms-notify-acts">
                         <span />
-                        <button type="button" className="t-caption fms-notify-hide" onClick={() => unhide(a)} aria-label={`Show "${a.title}" again`}>
-                          Show again
+                        <button type="button" className="t-caption fms-notify-hide" onClick={() => unhide(a)} aria-label={`Bring back "${a.title}"`}>
+                          Bring back
                         </button>
                       </div>
                     </li>

@@ -2536,7 +2536,14 @@ export function AskPanel({
     const madeThing = new RegExp(String.raw`\b(?:random|sample|example|fake|dummy|mock|made[\s-]?up|imaginary|hypothetical|pretend)\s+(?:\w+\s+){0,3}?${DATA}\b`, "i");
     // Or asked to be made: "make up", "come up with", "generate", "invent", with something to make.
     const makeIt = new RegExp(String.raw`\b(?:make\s+up|come\s+up\s+with|generate|invent|create\s+(?:a|some)\s+(?:random|sample|fake))\b[^.?!]*\b${DATA}\b`, "i");
-    return madeThing.test(own) || makeIt.test(own);
+    /*
+     * A statement, report or export is of the owner's own records, whatever
+     * verb asks for it: "Generate a statement of spending last month only"
+     * came back as made-up figures (owner, 17 November 2026). Only a word
+     * that says the figures are invented makes it so.
+     */
+    const ownRecords = /\b(?:statements?|reports?|summary|summari[sz]e|pdf|csv|spreadsheet|sheet|export|my|mine|last\s+month|this\s+month|last\s+year|this\s+year|records?|ledger|entries)\b/i.test(own);
+    return madeThing.test(own) || (makeIt.test(own) && !ownRecords);
   };
 
   /** How many spending entries use each word, item and description, for finding what a question is about. */
@@ -10403,12 +10410,19 @@ export function AskPanel({
     }
 
     // The question before this one, for "pdf" or "export that" said after its answer (`fileOfAnswer`).
-    const fileSubject = [...turns]
+    const saidBefore = [...turns]
       .reverse()
       .slice(0, 10)
       .filter((t): t is Said => t.kind === "you")
       .map((t) => t.text)
-      .find((text) => text.trim() !== "" && !readExportAsk(text, asOf));
+      .filter((text) => text.trim() !== "");
+    /*
+     * A statement asked for just before is the one meant: "Generate a
+     * statement of spending last month only", then "Pdf", made a statement
+     * of the whole year, January to today (owner, 17 November 2026).
+     */
+    const justAsked = saidBefore[0] !== undefined && readExportAsk(saidBefore[0], asOf)?.kind === "statement" ? saidBefore[0] : undefined;
+    const fileSubject = justAsked ?? saidBefore.find((text) => !readExportAsk(text, asOf));
     const readAsked = as || aboutAFile ? null : fileOfAnswer(ruled, fileSubject, asOf) ?? readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
     // "Subscriptions only", "Spotify", "cash withdrawals": the part of the statement named (`withCut`).
     /*
@@ -10682,6 +10696,48 @@ export function AskPanel({
       await findDifference(note, { account: whichNamed, actual: which.actual, gap: null }, which.said);
       return;
     }
+    /*
+     * "Can you check if that number is accurate", just after a budget card:
+     * the card's figure worked out in front of the owner. It was taken for a
+     * balance to check and answered "Which account is it?" (owner, 17
+     * November 2026).
+     */
+    const cardBefore = [...turns].reverse().find((t) => t.kind !== "you");
+    if (
+      !as &&
+      files.length === 0 &&
+      cardBefore !== undefined &&
+      isBudgeting(cardBefore) &&
+      /\b(?:accurate|correct|right|true|add\s+up|adds\s+up|how\s+did\s+you\s+get|where\s+(?:does|did)\s+(?:it|that|this)\s+come)\b/i.test(note) &&
+      /\b(?:that|this|it|the)\b/i.test(note) &&
+      note.trim().split(/\s+/).length <= 16
+    ) {
+      const y = Number(asOf.slice(0, 4));
+      const m = Number(asOf.slice(5, 7));
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent, asOf });
+      if (ib) {
+        const held = ib.most - ib.spent - ib.safe - ib.plans;
+        const parts = [
+          `${formatMoney(ib.spent)} already spent`,
+          ...(held > 0 ? [`${formatMoney(held)} held for allocations`] : []),
+          ...(ib.plans > 0 ? [`${formatMoney(ib.plans)} set aside for plans`] : []),
+          `${formatMoney(ib.safe)} safe to spend now`,
+        ];
+        const lastPart = parts.pop();
+        const text = [
+          `The most your spending budget can be this month is **${formatMoney(ib.most)}**: ${parts.join(", ")} and ${lastPart}.${held < 0 ? ` Less ${formatMoney(-held)} kept for savings.` : ""}`,
+          `Your spending budget now is ${formatMoney(ib.budget)}, so ${ib.room > 0 ? `it can rise by ${formatMoney(ib.room)}` : ib.over > 0 ? `it is ${formatMoney(ib.over)} more than your money can cover` : "it is exactly what your money keeps"}. Bills and subscriptions are budgeted on their own.`,
+        ].join("\n\n");
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        say({ kind: "assistant", text, from: "this device" });
+        log(aiEvent("answered", "add", { text, model: "this device" }));
+        return;
+      }
+    }
+
     const askedToFind = as
       ? null
       : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf, talkedAbout ?? lastRead.current?.account) ??

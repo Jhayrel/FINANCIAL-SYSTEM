@@ -44,6 +44,12 @@ import { WEEKDAY_NAMES } from "../domain/dates";
 import type { IsoDate, ReferenceLists } from "../domain/types";
 import { useMediaQuery } from "./useMediaQuery";
 
+/** "Nov 15": a day of this month, short, for a line that has to fit a phone. */
+const dayShort = (iso: string): string => {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+};
+
 export function AllocationsCard({
   month,
   lines,
@@ -116,7 +122,7 @@ export function AllocationsCard({
         ? `Nothing was allocated in ${name}.`
         : "Money set aside for a kind of spending this month"
       : month.phase === "running"
-        ? `${formatMoney(month.held)} set aside of ${formatMoney(month.allocated)} allocated. Safe to spend is what is left after it.`
+        ? `${formatMoney(month.held)} set aside of ${formatMoney(month.allocated)} allocated`
         : month.phase === "past"
           ? `${formatMoney(month.spent)} spent of ${formatMoney(month.allocated)} allocated${month.unused > 0 ? `, ${formatMoney(month.unused)} not used` : ""}`
           : `${formatMoney(month.allocated)} allocated, held from the 1st`;
@@ -142,7 +148,7 @@ export function AllocationsCard({
               {spendingBudget > 0
                 ? month.allocated > spendingBudget
                   ? `The allocations add up to ${formatMoney(month.allocated - spendingBudget)} more than the ${formatMoney(spendingBudget)} spending budget.`
-                  : `${formatMoney(month.allocated)} of the ${formatMoney(spendingBudget)} spending budget is allocated; ${formatMoney(spendingBudget - month.allocated)} is for everything else.`
+                  : `${formatMoney(spendingBudget - month.allocated)} of the ${formatMoney(spendingBudget)} spending budget is for everything else.`
                 : "No spending budget for the month, so the allocations stand on their own."}
               {month.over > 0 ? ` ${formatMoney(month.over)} went past its allocation, out of money that was free.` : ""}
             </p>
@@ -325,8 +331,9 @@ function AllocationRow({
       <ProgressBar value={s.spent} max={s.line.amount} height={6} label={`of ${s.name} spent`} />
       {s.week && (
         <span className={s.week.left < 0 ? "t-caption fms-note-over" : "t-caption"} style={s.week.left < 0 ? undefined : { color: "var(--ink-2)" }}>
-          Week {s.week.index}, {formatMedium(s.week.from)} to {formatMedium(s.week.to)}: {formatMoney(s.week.spent)} of {formatMoney(s.week.share)}
-          {s.week.left < 0 ? `, ${formatMoney(-s.week.left)} past it` : `, ${formatMoney(s.week.left)} left this week`}
+          {/* One short line: "Week 3, November 15, 2026 to November 21, 2026: ..." wrapped to three on a phone (owner, 17 November 2026). */}
+          This week, {dayShort(s.week.from)} to {dayShort(s.week.to)}:{" "}
+          {s.week.left < 0 ? `${formatMoney(-s.week.left)} past its ${formatMoney(s.week.share)}` : `${formatMoney(s.week.left)} left of ${formatMoney(s.week.share)}`}
         </span>
       )}
       {s.days && (

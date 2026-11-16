@@ -866,7 +866,6 @@ export default function App() {
   const [bellOpen, setBellOpen] = useState(false);
   /** The finding a tap on the bell brought to this screen, and whether its part of the screen was found (`bellTarget.ts`). */
   const [bellNote, setBellNote] = useState<{ readonly id: string; readonly title: string; readonly detail: string; readonly at: number; readonly rows?: boolean } | null>(null);
-  const [bellFound, setBellFound] = useState(false);
 
   /**
    * Write the audit event beside the data write.
@@ -2062,8 +2061,12 @@ export default function App() {
    * into view once the screen has drawn. Looked for a few times, since a
    * screen fills in after it opens; the outline goes with the note.
    */
+  /*
+   * Only the outline, for a few seconds: a note repeating the notification
+   * stood over the screen it had opened and covered what it pointed at
+   * (owner, 17 November 2026: "it shows the notification as distraction").
+   */
   useEffect(() => {
-    setBellFound(false);
     if (!bellNote || bellNote.rows) return;
     const needles = bellNeedles(bellNote, [
       ...settings.accounts.map((a) => a.name),
@@ -2076,9 +2079,26 @@ export default function App() {
     ]).map((n) => n.toLowerCase());
     let marked: Element | null = null;
     let tries = 0;
+    // The month's own figures, for a finding about the month as a whole: its words name nothing on the screen.
+    const direct = /^(?:spending-over|budget-over|budget-pace|bills-over)/.test(bellNote.id)
+      ? '[data-bell="month"]'
+      : /^(?:budget-beyond-money|income-since-budget)/.test(bellNote.id)
+        ? '[data-bell="money"]'
+        : null;
     const look = (): void => {
       const main = mainRef.current;
       if (!main) return;
+      const fixed = direct ? main.querySelector<HTMLElement>(direct) : null;
+      if (fixed) {
+        fixed.classList.add("fms-from-bell");
+        fixed.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        marked = fixed;
+        clearTimer = window.setTimeout(() => {
+          fixed.classList.remove("fms-from-bell");
+          setBellNote(null);
+        }, 4000);
+        return;
+      }
       for (const needle of needles) {
         let best: HTMLElement | null = null;
         for (const el of main.querySelectorAll<HTMLElement>("h1, h2, h3, h4, li, tr, dt, summary, button, p, span, div")) {
@@ -2092,16 +2112,21 @@ export default function App() {
           target.classList.add("fms-from-bell");
           target.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
           marked = target;
-          setBellFound(true);
+          clearTimer = window.setTimeout(() => {
+            target.classList.remove("fms-from-bell");
+            setBellNote(null);
+          }, 4000);
           return;
         }
       }
       tries += 1;
       if (tries < 6) timer = window.setTimeout(look, 400);
     };
+    let clearTimer = 0;
     let timer = window.setTimeout(look, 350);
     return () => {
       window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
       marked?.classList.remove("fms-from-bell");
     };
     // Looked for once for each tap on the bell: the lists it reads names from do not start it again.
@@ -3347,11 +3372,6 @@ export default function App() {
         screen jumping down under them, 26 September 2026.
       */}
       <div className="fms-notices" aria-live="polite" hidden={bellOpen}>
-        {bellNote && (
-          <Notice status="info" title={`From the bell: ${bellNote.title}`} onDismiss={() => setBellNote(null)}>
-            {bellNote.detail} {bellNote.rows ? "The Database is showing the rows it is about." : bellFound ? "The part of this screen it is about is outlined." : "This is the screen where it is dealt with."}
-          </Notice>
-        )}
         {cleaning && (
           <Notice
             status="info"

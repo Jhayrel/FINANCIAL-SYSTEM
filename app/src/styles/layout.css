@@ -5675,6 +5675,71 @@ button.fms-recent-row:disabled {
   border-top: 1px solid var(--hairline);
 }
 
+/*
+ * The money behind the budget as a sum (owner, 17 November 2026: "too much
+ * text ... make it align"): the parts, then the total under a 2px ink rule
+ * (rule D2), every figure in one right-aligned column.
+ */
+.fms-moneysum dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-moneysum > div.fms-moneysum-total {
+  border-top: 2px solid var(--ink);
+  margin-top: var(--space-1);
+}
+
+.fms-moneysum > div.fms-moneysum-total dt {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* Where the money came from: one tap away, every part of it. */
+.fms-moneysum-from > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-moneysum-list {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+}
+
+.fms-moneysum-list > li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+/* Figures to fill in with one tap: an even grid, the label over the figure. */
+.fms-suggests {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-2);
+}
+
+.fms-suggests > .fms-btn {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 52px;
+  text-align: left;
+}
+
+.fms-suggest-label {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
 .fms-planner-chips {
   display: flex;
   flex-wrap: wrap;
@@ -7811,6 +7876,55 @@ button.fms-recent-row:disabled {
   margin: 0;
   padding: var(--space-4);
   color: var(--ink-3);
+}
+
+/* Clear all and Close, side by side at the right of the heading. */
+.fms-notify-headacts {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.fms-notify-newcount {
+  color: var(--brand-700);
+  font-weight: 600;
+}
+
+/* Two lines of the detail: the title says what it is, the screen it opens says the rest (owner, 17 November 2026). */
+.fms-notify-detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--ink-2);
+}
+
+/* New since the list was last opened: a dot after the title, and listed first. */
+.fms-notify-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--brand-600);
+  vertical-align: middle;
+}
+
+.fms-notify-stays {
+  padding: 0 var(--space-3);
+  color: var(--ink-3);
+}
+
+.fms-notify-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
 }
 
 .fms-notify-ai {
