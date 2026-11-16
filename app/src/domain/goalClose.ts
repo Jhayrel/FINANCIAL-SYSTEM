@@ -80,9 +80,16 @@ export function planGoalClose(
     readonly today: IsoDate;
     readonly nextRecordNumber: number;
     readonly reconcile?: Reconciliation | undefined;
+    /**
+     * Where the money goes, when not back to the account it sits in: a
+     * wallet or cash to spend it, another savings account to keep it (owner,
+     * 13 November 2026: "I still need to transfer the goal money to the bank
+     * or to the wallet or to cash"). Still one transfer the owner presses.
+     */
+    readonly to?: Account | undefined;
   },
 ): GoalClosePlan {
-  const parent = accounts.find((a) => a.id === goal.parentId);
+  const parent = options.to && options.to.id !== goal.id ? options.to : accounts.find((a) => a.id === goal.parentId);
   const recorded = walletBalance(transactions, goal.name);
 
   // A bank pays interest; an envelope of cash does not. Only ask where the
@@ -166,7 +173,7 @@ export function planGoalClose(
       // spending. `domain/transfers.ts` derives exactly this.
       category: "",
       item: "",
-      description: `${goal.name} closed, balance returned to ${parent.name}`,
+      description: parent.id === goal.parentId ? `${goal.name} closed, balance returned to ${parent.name}` : `${goal.name} closed, balance moved to ${parent.name}`,
       amount: returning,
       fee: 0,
       total: returning,
@@ -225,4 +232,70 @@ export function overdueGoals(
     .filter((g) => !g.archived && g.deadline !== undefined && g.deadline < today)
     .map((goal) => ({ goal, balance: walletBalance(transactions, goal.name) }))
     .filter((g) => g.balance !== 0);
+}
+
+/**
+ * Interest while a goal is still running: what the bank shows against what
+ * the app has, the difference as interest (or a bank charge), one row. A
+ * Maya goal earns interest every day, and the only way it reached the app
+ * was closing the goal (owner, 13 November 2026: "what if its a goal with
+ * interest like maya goal"). The goal stays open; nothing else moves.
+ */
+export function goalInterest(
+  goal: Account,
+  transactions: readonly Transaction[],
+  options: { readonly actual: Centavos; readonly today: IsoDate; readonly nextRecordNumber: number },
+): { readonly recorded: Centavos; readonly adjustment: Centavos; readonly rows: readonly Transaction[] } {
+  const recorded = walletBalance(transactions, goal.name);
+  const adjustment = options.actual - recorded;
+  if (adjustment === 0) return { recorded, adjustment, rows: [] };
+  const row: Transaction =
+    adjustment > 0
+      ? {
+          id: `goal-interest-${goal.id}-${options.today}-${options.nextRecordNumber}`,
+          recordNumber: options.nextRecordNumber,
+          date: options.today,
+          type: "Revenue",
+          fromWallet: "",
+          toWallet: goal.name,
+          category: "Revenue",
+          item: "Interest",
+          description: `Interest credited to ${goal.name}`,
+          amount: adjustment,
+          fee: 0,
+          total: adjustment,
+          notes: "From the balance the bank shows, while the goal runs.",
+          status: "Received",
+        }
+      : {
+          id: `goal-fee-${goal.id}-${options.today}-${options.nextRecordNumber}`,
+          recordNumber: options.nextRecordNumber,
+          date: options.today,
+          type: "Spending",
+          fromWallet: goal.name,
+          toWallet: "",
+          category: "Spending",
+          item: "Transaction Fee",
+          description: `Bank charge on ${goal.name}`,
+          amount: -adjustment,
+          fee: 0,
+          total: -adjustment,
+          notes: "From the balance the bank shows, while the goal runs.",
+          status: "Done",
+        };
+  return { recorded, adjustment, rows: [row] };
+}
+
+/**
+ * What a goal's money becomes where it goes, said before it moves: "how
+ * can I declare it as safe to spend if its already mixed with other money"
+ * (owner, 13 November 2026). Into a wallet or cash it is ordinary money and
+ * counts in safe to spend from that day; into savings or a reserve it stays
+ * out of it; into another goal it is saved for that goal.
+ */
+export function destinationWords(to: Account | undefined): string {
+  if (!to) return "";
+  if (to.kind === "goal") return `In ${to.name} it is saved for that goal, out of safe to spend.`;
+  if (to.kind === "savings" || to.kind === "reserve") return `In ${to.name} it stays savings: not counted in safe to spend until you move it to a wallet.`;
+  return `In ${to.name} it is ordinary money: counted in safe to spend from today, with the rest of what the wallets hold.`;
 }

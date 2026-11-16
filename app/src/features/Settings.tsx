@@ -39,7 +39,7 @@ import {
 } from "../domain/accounts";
 import { walletBalance } from "../domain/balances";
 import type { Alert as Finding } from "../domain/alerts";
-import { describeClose, planGoalClose } from "../domain/goalClose";
+import { describeClose, destinationWords, goalInterest, planGoalClose } from "../domain/goalClose";
 import { closePlansNote, goalParentNote, moveTargets, planGoalMove, type PlansChoice } from "../domain/goalMove";
 import { planStartClean, validateBackup, type Backup, type BackupFile, type BackupOutcome, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
@@ -1603,6 +1603,12 @@ function GoalRow({
   const [blocked, setBlocked] = useState<string | null>(null);
   const [reconciling, setReconciling] = useState(false);
   const [actualBalance, setActualBalance] = useState<Centavos | null>(null);
+  // Closing with money in it: where the money goes first (`goalClose.ts`, `destinationWords`).
+  const [closing, setClosing] = useState(false);
+  const [closeTo, setCloseTo] = useState<string>("");
+  // Interest while it runs: the balance the bank shows now (`goalInterest`).
+  const [interestOpen, setInterestOpen] = useState(false);
+  const [bankShows, setBankShows] = useState<Centavos | null>(null);
   const { confirm, dialog } = useConfirm();
 
   /** Record numbers continue from the end of the ledger. */
@@ -1624,10 +1630,12 @@ function GoalRow({
    * invisible until someone types it in, and this is the one moment you are
    * looking at that account.
    */
+  const closeAccount = accounts.find((a) => a.id === closeTo) ?? parent;
   const finish = async (): Promise<void> => {
     const dry = planGoalClose(goal, accounts, transactions, {
       today: today(),
       nextRecordNumber: nextRecord,
+      to: closeAccount,
     });
 
     if (dry.blocked) {
@@ -1657,6 +1665,7 @@ function GoalRow({
     const plan = planGoalClose(goal, accounts, transactions, {
       today: today(),
       nextRecordNumber: nextRecord,
+      to: closeAccount,
       ...(actual === undefined ? {} : { reconcile: { actual } }),
     });
 
@@ -1667,7 +1676,7 @@ function GoalRow({
 
     const ok = await confirm({
       title: `Close ${goal.name}?`,
-      body: `${describeClose(plan, formatMoney)}${closePlansNote(goal, allPlans)}`,
+      body: `${describeClose(plan, formatMoney)}${plan.returning > 0 ? ` ${destinationWords(plan.parent)}` : ""}${closePlansNote(goal, allPlans)}`,
       confirmLabel: "Close it",
     });
     if (!ok) return;
@@ -1675,6 +1684,27 @@ function GoalRow({
     if (plan.rows.length > 0) onAddTransactions([...plan.rows]);
     onUpdate({ archived: true });
     setReconciling(false);
+    setClosing(false);
+  };
+
+  /** Interest the bank paid into it while it runs: one row, the goal stays open. */
+  const addInterest = async (): Promise<void> => {
+    if (bankShows === null) return;
+    const read = goalInterest(goal, transactions, { actual: bankShows, today: today(), nextRecordNumber: nextRecord });
+    if (read.rows.length === 0) {
+      setBlocked(`The bank shows what the app has, ${formatMoney(read.recorded)}: no interest to add.`);
+      setInterestOpen(false);
+      return;
+    }
+    const ok = await confirm({
+      title: read.adjustment > 0 ? `Add ${formatMoney(read.adjustment)} of interest to ${goal.name}?` : `Record a ${formatMoney(-read.adjustment)} bank charge on ${goal.name}?`,
+      body: `The app has ${formatMoney(read.recorded)} in it and the bank shows ${formatMoney(bankShows)}. ${read.adjustment > 0 ? "The difference is income the bank paid, saved in the goal." : "The difference is a charge the bank took, recorded as spending."} The goal stays open; nothing else moves.`,
+      confirmLabel: read.adjustment > 0 ? "Add the interest" : "Record the charge",
+    });
+    if (!ok) return;
+    onAddTransactions([...read.rows]);
+    setInterestOpen(false);
+    setBankShows(null);
   };
 
   return (
@@ -1726,8 +1756,8 @@ function GoalRow({
       {p.status === "matured" && (
         <div style={{ marginTop: "var(--space-2)" }}>
           <Alert status="warn" title="Deadline passed">
-            Saved <Money value={p.saved} size="s" /> of <Money value={p.target} size="s" />. Spend it, move it
-            back to {parent?.name ?? "the parent"}, or extend the deadline. The app will not move your money for you.
+            Saved <Money value={p.saved} size="s" /> of <Money value={p.target} size="s" />. Spend it, close the goal
+            and say where the money goes, or extend the deadline. The app will not move your money for you.
           </Alert>
         </div>
       )}
@@ -1736,8 +1766,47 @@ function GoalRow({
         <div style={{ marginTop: "var(--space-2)" }}>
           <Alert status="ok" title="Target reached">
             <Money value={p.saved} size="s" /> saved. Record the purchase as a Spending row from this goal,
-            then mark it done.
+            or close the goal and move the money to the wallet you will pay from.
           </Alert>
+        </div>
+      )}
+
+      {closing && !reconciling && (
+        <div className="fms-goalmove" style={{ marginTop: "var(--space-3)", display: "grid", gap: "var(--space-2)" }}>
+          <Field label={`Where its ${formatMoney(p.saved)} goes`} help={destinationWords(closeAccount)}>
+            <Select
+              value={closeAccount?.name ?? ""}
+              options={[...(parent ? [parent.name] : []), ...targets.filter((a) => a.id !== parent?.id && a.kind !== "goal").map((a) => a.name)]}
+              onChange={(name) => setCloseTo(accounts.find((a) => a.name === name)?.id ?? "")}
+            />
+          </Field>
+          <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+            Done or cancelled, closing moves what it holds there as one transfer, and the goal is archived. Bought the thing already? Record the purchase from this goal first, then close it.
+          </p>
+          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+            <Button size="sm" variant="primary" disabled={!closeAccount} onClick={() => void finish()}>
+              Continue
+            </Button>
+            <Button size="sm" onClick={() => setClosing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {interestOpen && (
+        <div className="fms-goalmove" style={{ marginTop: "var(--space-3)", display: "grid", gap: "var(--space-2)" }}>
+          <Field label="What the bank shows in it now" help={`The app has ${formatMoney(p.saved)}. More than that is interest; less is a charge.`}>
+            <AmountInput value={bankShows} onChange={setBankShows} />
+          </Field>
+          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+            <Button size="sm" variant="primary" disabled={bankShows === null} onClick={() => void addInterest()}>
+              Continue
+            </Button>
+            <Button size="sm" onClick={() => setInterestOpen(false)}>
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1813,7 +1882,19 @@ function GoalRow({
             }}
           />
         </span>
-        <Button size="sm" onClick={() => void finish()}>Mark done</Button>
+        {/*
+          Done or given up, it is the same close: the money goes where it is
+          said to, as one transfer pressed here (owner, 13 November 2026:
+          "what if I cancled the goal where to the money go?").
+        */}
+        <Button size="sm" aria-expanded={closing} onClick={() => (p.saved > 0 ? setClosing((v) => !v) : void finish())}>
+          {closing ? "Stop closing" : "Close the goal"}
+        </Button>
+        {p.saved > 0 && (parent?.channel ?? "bank") === "bank" && (
+          <Button size="sm" aria-expanded={interestOpen} onClick={() => setInterestOpen((v) => !v)}>
+            {interestOpen ? "Stop" : "Add interest"}
+          </Button>
+        )}
         {p.saved > 0 && targets.length > 0 && (
           <Button size="sm" aria-expanded={moving} onClick={() => setMoving((v) => !v)}>
             {moving ? "Stop moving" : "Move its money"}

@@ -289,52 +289,95 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
    */
   if (sheet.budget && sheet.budget.months.length > 0) {
     const b = sheet.budget;
-    const rows: { readonly label: string; readonly part?: BudgetPart }[] = [];
-    for (const m of b.months) {
-      rows.push({ label: `${m.label}${m.partial ? ", to date" : ""}` });
-      for (const p of m.parts) rows.push({ label: p.label, part: p });
-    }
-    if (b.months.length > 1) {
-      rows.push({ label: "Whole period" });
-      for (const p of b.totals) rows.push({ label: p.label, part: p });
-    }
-    const col = { label: MARGIN + INSET, budget: MARGIN + CONTENT_W - 190, spent: MARGIN + CONTENT_W - 100, left: MARGIN + CONTENT_W - INSET };
+    /*
+     * Cleaned for reading (owner, 16 November 2026: "just clean the ui"):
+     * the page titled Budget no longer says Budget again over the table; a
+     * summary line says the period in one go; each part says how much of
+     * its budget it used; and a month is never split across two pages.
+     */
+    const col = {
+      label: MARGIN + INSET,
+      budget: MARGIN + CONTENT_W - 250,
+      spent: MARGIN + CONTENT_W - 172,
+      used: MARGIN + CONTENT_W - 112,
+      left: MARGIN + CONTENT_W - INSET,
+    };
     const h = LINE + PAD_Y * 2 - 1;
     const head = (): void => {
-      page.text(MARGIN, y, "Budget", { size: 9, font: "bold", color: INK });
-      y += 8;
+      if (!budgetOnly) {
+        page.text(MARGIN, y, "Budget", { size: 9, font: "bold", color: INK });
+        y += 8;
+      }
       const base = y + PAD_Y + LINE - 3;
-      page.text(col.budget, base, "Budget", { size: META, color: INK_3, align: "right" });
+      page.text(col.label, base, "Part", { size: META, color: INK_3 });
+      page.text(col.budget, base, "Budgeted", { size: META, color: INK_3, align: "right" });
       page.text(col.spent, base, "Spent", { size: META, color: INK_3, align: "right" });
-      page.text(col.left, base, "Left", { size: META, color: INK_3, align: "right" });
+      page.text(col.used, base, "Used", { size: META, color: INK_3, align: "right" });
+      page.text(col.left, base, "Left or over", { size: META, color: INK_3, align: "right" });
       y += h;
       page.line(MARGIN, y, MARGIN + CONTENT_W, y, INK, 0.9);
     };
-    if (y + 26 + h * 3 > bottom) {
+    // The two tracks, spending and bills, over the period: what the summary says.
+    const tracks = (parts: readonly BudgetPart[]): { budget: number; spent: number } =>
+      parts.filter((x) => x.kind === "spending" || x.kind === "bills").reduce((a, x) => ({ budget: a.budget + x.budget, spent: a.spent + x.spent }), { budget: 0, spent: 0 });
+    const whole = tracks(b.months.length > 1 ? b.totals : (b.months[0]?.parts ?? []));
+    const over = b.months.filter((m) => {
+      const t = tracks(m.parts);
+      return t.budget > 0 && t.spent > t.budget;
+    }).length;
+    const summary = [
+      `Budgeted ${formatAmount(whole.budget)}`,
+      `spent ${formatAmount(whole.spent)}`,
+      whole.budget > 0 ? (whole.spent > whole.budget ? `${formatAmount(whole.spent - whole.budget)} over` : `${formatAmount(whole.budget - whole.spent)} left`) : "no budget set",
+      ...(b.months.length > 1 ? [`${over} of ${b.months.length} months over`] : []),
+    ].join(" · ");
+    if (y + 26 + h * 4 > bottom) {
       page = doc.addPage(PAGE_W, PAGE_H);
       y = continuation(page, sheet);
     } else y += budgetOnly ? 10 : 22;
+    // The summary band, before the table.
+    {
+      const bh = LINE + PAD_Y * 2 + 2;
+      page.rect(MARGIN, y, CONTENT_W, bh, TINT);
+      page.text(col.label, y + PAD_Y + LINE - 1, summary, { size: BODY, font: "bold", color: whole.budget > 0 && whole.spent > whole.budget ? RED : INK });
+      y += bh + 6;
+    }
     head();
-    for (const r of rows) {
-      if (y + h > bottom) {
+    const used = (p: BudgetPart): string => (p.budget > 0 ? `${Math.round((p.spent * 100) / p.budget)}%` : "");
+    const groups: { readonly label: string; readonly parts: readonly BudgetPart[] }[] = [
+      ...b.months.map((m) => ({ label: `${m.label}${m.partial ? ", to date" : ""}`, parts: m.parts })),
+      ...(b.months.length > 1 ? [{ label: "Whole period", parts: b.totals }] : []),
+    ];
+    for (const g of groups) {
+      // A month stays on one page: its heading and all its parts together.
+      if (y + h * (g.parts.length + 1) > bottom) {
         page = doc.addPage(PAGE_W, PAGE_H);
         y = continuation(page, sheet);
         head();
       }
-      const base = y + PAD_Y + LINE - 2.4;
-      if (!r.part) {
-        page.rect(MARGIN, y, CONTENT_W, h, TINT);
-        page.text(col.label, base, r.label, { size: BODY, font: "bold", color: INK });
-      } else {
-        const p = r.part;
+      const t = tracks(g.parts);
+      const gb = y + PAD_Y + LINE - 2.4;
+      page.rect(MARGIN, y, CONTENT_W, h, TINT);
+      page.text(col.label, gb, g.label, { size: BODY, font: "bold", color: INK });
+      if (t.budget > 0) {
+        page.text(col.budget, gb, formatAmount(t.budget), { size: BODY, font: "bold", align: "right", color: INK });
+        page.text(col.spent, gb, formatAmount(t.spent), { size: BODY, font: "bold", align: "right", color: INK });
+        page.text(col.used, gb, `${Math.round((t.spent * 100) / t.budget)}%`, { size: BODY, font: "bold", align: "right", color: t.spent > t.budget ? RED : INK });
+        page.text(col.left, gb, t.spent > t.budget ? `${formatAmount(t.spent - t.budget)} over` : formatAmount(t.budget - t.spent), { size: BODY, font: "bold", align: "right", color: t.spent > t.budget ? RED : INK });
+      }
+      y += h;
+      page.line(MARGIN, y, MARGIN + CONTENT_W, y, RULE, 0.5);
+      for (const p of g.parts) {
+        const base = y + PAD_Y + LINE - 2.4;
         page.text(col.label + 6, base, p.label, { size: BODY, color: INK });
         if (p.budget > 0) page.text(col.budget, base, formatAmount(p.budget), { size: BODY, align: "right", color: INK });
         else page.text(col.budget, base, "Not set", { size: META, align: "right", color: INK_3 });
         page.text(col.spent, base, formatAmount(p.spent), { size: BODY, align: "right", color: INK });
+        if (p.budget > 0) page.text(col.used, base, used(p), { size: BODY, align: "right", color: p.left !== null && p.left < 0 ? RED : INK_3 });
         if (p.left !== null) page.text(col.left, base, p.left < 0 ? `${formatAmount(-p.left)} over` : formatAmount(p.left), { size: BODY, align: "right", color: p.left < 0 ? RED : INK });
+        y += h;
+        page.line(MARGIN, y, MARGIN + CONTENT_W, y, RULE, 0.5);
       }
-      y += h;
-      page.line(MARGIN, y, MARGIN + CONTENT_W, y, RULE, 0.5);
     }
   }
 

@@ -143,6 +143,22 @@ moves is still a row you approved.
 | G5 | A goal's balance is part of net worth and of its parent's total, but never of the daily budget. |
 | G6 | Deleting a goal with a balance is refused, move the money out first. |
 | G7 | Overshooting the target is fine and is shown as such. |
+| G8 | Closing a goal, done or given up, moves what it holds to the account the owner picks: back to its parent, a wallet, cash, or other savings. One transfer, pressed. Into a wallet or cash it is ordinary money and counts in safe to spend from that day; into savings it stays out of it. (Owner, 13 November 2026.) |
+| G9 | Interest is recorded while a goal runs, not only at its close: the balance the bank shows against the app's, the difference one row (interest in, or a bank charge out). The goal stays open. |
+| G10 | Goal money spent on something else is allowed, and the form says what the goal is left holding and that giving the goal up is closing it (G8). |
+
+### The owner's questions, answered by the rules above
+
+| Question | What happens |
+|---|---|
+| A goal that earns interest, like a Maya goal | "Add interest" on the goal (G9), or closing it asks what the bank shows first. |
+| Finished: the money has to go to the bank, a wallet or cash | "Close the goal" asks where it goes (G8). |
+| How it becomes safe to spend once mixed with other money | Moving it into a wallet or cash is what makes it spendable; from then it is counted like the rest (G5, G8). |
+| Cancelled: where the money goes | The same close, to whichever account is picked (G8). Nothing moves until it is pressed (G4). |
+| Started from other wallets or cash | Funding is any transfer into the goal, from any account (G2). |
+| Spent on something else | Allowed, said on the form with what is left (G10). |
+| Done | Status turns reached (G3); the prompt offers the close (G8). |
+| The Planner | A plan can save in a goal (`planGoal.ts`): the goal holds its money out of safe to spend, and moving or closing the goal asks what happens to the plans saving in it (`goalMove.ts`). |
 
 ---
 

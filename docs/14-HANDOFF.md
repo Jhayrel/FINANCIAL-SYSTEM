@@ -3585,6 +3585,22 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
   finding's "Open ..." and Hide share one line under its words. A late plan
   with a small rest (`smallRest`, the Add form's threshold) says "If it cost
   less, mark it paid", and its sheet opens on that button.
+- **Goals** (`goalClose.ts`, Settings, `docs/05` G8 to G10). "Close the
+  goal", done or given up, asks where the money goes: its parent, a wallet,
+  cash or other savings, and says what that does to safe to spend. "Add
+  interest" records interest from the balance the bank shows while the goal
+  runs. Goal money spent on something else says what the goal is left
+  holding. `goalScenarios.test.ts` walks the owner's questions.
+- **Budget PDF** (`statementPdf.ts`). A summary line (budgeted, spent, left or
+  over, months over), each month's row carrying its totals, a Used column,
+  a month never split across pages, and no second "Budget" heading on a
+  page already titled Budget.
+- **Open: an AI memory.** The model reads the last 10 messages and
+  everything saved (plans, allocations, budgets, goals, entries); what was
+  only said in the chat further back is not read. The owner asked for a way
+  for it to remember. Proposed, not built: "Remember this?" as a card when a
+  lasting fact is said, kept as notes in Settings, AI, that can be edited or
+  removed, and sent with every question. Waiting on the owner.
 
 ## 6. What the owner has to do
 
