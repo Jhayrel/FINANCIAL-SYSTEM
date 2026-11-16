@@ -3653,6 +3653,28 @@ outstanding with fees, latest bill PHP 0.00 due 21 November).
   after it closes; a new borrowing on the next bill; late; due on the
   closing day, on a day of the month, and 45 days after. Invented figures.
 
+- **Four chat readings found wrong by two robots.** The what-if battery
+  (`hunt16.cjs`, 44 cases) flagged 10: two real, the rest the robot's own
+  patterns, the AI blocked on purpose for speed, or a card the app rightly
+  asks to confirm. The chat-changes robot found the other two:
+  - "put it back" right after "delete it" said nothing in the Bin matched.
+    Only "put back" with nothing between was read (`recall.ts`), and the
+    model's whole sentence as its target was searched for. Now "put it
+    back", "bring that back" and the like restore the entry the chat just
+    binned; "put 500 back in maya" is still an entry. `recall.test.ts`.
+  - "add a gym allocation of 50 each tuesday and thursday" added 50 to the
+    Gym line's month and asked how ₱890.00 splits. "of 50" was read as "by
+    50"; now only "by", "add 50" and "a raise of 50" move the amount, and the
+    line becomes 50 a session on those days (`allocationChange.ts`).
+  - "the food allocation" asked "School Lunch or Food?" when one line is
+    called Food and School Lunch only counts Food entries that say so. The
+    line called by its kind is picked; School Lunch is still found by name.
+  - "My mom sent 14800 to my gcash to give to my aunt" asked which wallet it
+    came out of. Someone else sending money to give to a third person is
+    now money held for them, received into the wallet named
+    (`debtSentence.ts` `ASKED_TO_PASS`); "I sent 500 to my mom to give to my
+    aunt" is still the owner's own money going out. `heldToGive.test.ts`.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -282,9 +282,14 @@ const HELD =
  * None of the phrases above fit it. What marks this one is the
  * instruction: someone gave you money and asked you to move it on to a
  * third person. It is theirs the whole way through.
+ *
+ * Or the purpose, with someone else as the one sending: "My mom sent 14800
+ * to my gcash to give to my aunt" asked which wallet it came out of
+ * (16 November 2026 robot). Never when the owner sends it: "I sent 500 to
+ * my mom to give to my aunt" is their own money going out.
  */
 const ASKED_TO_PASS =
-  /\b(?:ask(?:ed|s)?|told|wants?|sabi|pakiusap|requested)\b[^.]{0,30}?\bme\b[^.]{0,30}?\bto\s+(?:send|give|transfer|pass|deliver|remit|forward|ipadala|ibigay|hatid)\b|\b(?:send|give|transfer|pass|remit|forward)\s+(?:it|this|the money|the cash|ito|iyon|yun)\s+to\b|\b(?:sabi|utos|bilin|pakiusap)\b[^.]{0,40}?\b(?:ipadala|ibigay|ipasa|iabot|hatid)\b|\b(?:ipadala|ibigay|ipasa|iabot)\s+ko\s+(?:sa|kay)\b/i;
+  /\b(?:mom|mother|mama|nanay|inay|papa|dad|daddy|father|tatay|itay|kuya|ate|tita|tito|lola|lolo|aunt|auntie|uncle|brother|sister|friend|boss|client|si\s+[a-z]+)\b[^.]{0,20}?\b(?:sent|send|sends|gave|gives|transferred|transfers|deposited|padala|nagpadala)\b[^.]{0,50}?\bto\s+(?:give|send|pass|deliver|hand|remit|forward|ibigay|ipadala)\s+(?:it\s+|this\s+|them\s+)?(?:to|sa|kay)\b|\b(?:ask(?:ed|s)?|told|wants?|sabi|pakiusap|requested)\b[^.]{0,30}?\bme\b[^.]{0,30}?\bto\s+(?:send|give|transfer|pass|deliver|remit|forward|ipadala|ibigay|hatid)\b|\b(?:send|give|transfer|pass|remit|forward)\s+(?:it|this|the money|the cash|ito|iyon|yun)\s+to\b|\b(?:sabi|utos|bilin|pakiusap)\b[^.]{0,40}?\b(?:ipadala|ibigay|ipasa|iabot|hatid)\b|\b(?:ipadala|ibigay|ipasa|iabot)\s+ko\s+(?:sa|kay)\b/i;
 
 /** Somebody other than the owner will pay: "he will repay me later", "my mother will pay for it". */
 const THEY_WILL_PAY =

@@ -52,8 +52,16 @@ export function saysLatestIsWrong(text: string): boolean {
 const BIN =
   /\b(delete|remove|erase|bin|cancel|undo|scrap|discard|take out|get rid of)\b/i;
 
-/** Bringing one back. */
-const RESTORE = /\b(restore|bring back|undelete|recover|put back|unbin|retrieve)\b/i;
+/**
+ * Bringing one back.
+ *
+ * "put it back" and "bring that back" too, said right after a delete in the
+ * chat (16 November 2026 robot): only "put back" with nothing between was
+ * read, so "put it back" found nothing in the Bin. Only a word that points
+ * back goes between, never a figure: "put 500 back in maya" is an entry.
+ */
+const RESTORE =
+  /\b(restore|bring back|undelete|recover|put back|unbin|retrieve)\b|\b(?:put|bring|get)\s+(?:it|that|this|them|those|these|(?:the|that|this)\s+(?:entry|row|record|one|last one|deleted one))\s+back\b/i;
 
 /**
  * Words that describe the instruction rather than the row.
@@ -63,7 +71,7 @@ const RESTORE = /\b(restore|bring back|undelete|recover|put back|unbin|retrieve)
  * which every row would answer to.
  */
 const INSTRUCTION =
-  /\b(delete|deleted|deleting|remove|removed|erase|erased|bin|binned|cancel|cancelled|undo|scrap|discard|discarded|restore|restored|bring|back|undelete|recover|recovered|put|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last|paid|pay|spent|spend|bought|buy|sent|send|gave|give|used|use|did|was|were|is|are|on|at|in|to)\b/gi;
+  /\b(delete|deleted|deleting|remove|removed|erase|erased|bin|binned|cancel|cancelled|undo|scrap|discard|discarded|restore|restored|bring|back|undelete|recover|recovered|put|get|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last|paid|pay|spent|spend|bought|buy|sent|send|gave|give|used|use|did|was|were|is|are|on|at|in|to)\b/gi;
 
 /**
  * The app's own vocabulary, which describes no particular row.

@@ -11938,7 +11938,13 @@ export function AskPanel({
         recall.action === "restore" && binnedHere.current.length > 0 && !wantsLatest
           ? deleted.filter((row) => binnedHere.current.includes(row.id))
           : [];
-      const pointsAtWhatHappened = justBinned.length > 0 && recall.phrase.trim().length <= 3;
+      /*
+       * Read on the device as well: the model may hand back the whole
+       * sentence as its target ("put it back"), which is nothing but
+       * instruction words once they are taken out.
+       */
+      const bare = (detectRecall(note)?.phrase ?? recall.phrase).trim();
+      const pointsAtWhatHappened = justBinned.length > 0 && (recall.phrase.trim().length <= 3 || bare.length <= 3);
 
       const candidates = pointsAtWhatHappened
         ? justBinned.slice(0, 1).map((row) => ({ row, score: 100, why: ["the one you just binned"] }))

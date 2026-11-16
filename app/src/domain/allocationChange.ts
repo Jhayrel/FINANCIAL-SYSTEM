@@ -224,7 +224,14 @@ function linesSaid(text: string, lines: readonly AllocationLine[]): AllocationLi
   if (byName.length > 0) return byName;
   const byWords = lines.filter((l) => l.words.split(/[,;]+/).some((w) => w.trim() && says(w)));
   if (byWords.length > 0) return byWords;
-  return lines.filter((l) => says(l.kind));
+  /*
+   * By kind, the line called by that kind first: "the food allocation", with
+   * one called Food and School Lunch counting Food entries, is the one called
+   * Food. Both were offered back as "Which one?" (16 November 2026 robot).
+   */
+  const byKind = lines.filter((l) => says(l.kind));
+  const plain = byKind.filter((l) => lineName(l).toLowerCase() === l.kind.toLowerCase());
+  return plain.length === 1 ? plain : byKind;
 }
 
 /** The kind of spending an addition is for, and the words that narrow it: "gym" is Self Care entries that say gym. */
@@ -279,7 +286,17 @@ function shaped(
   let input: AllocationInput = { ...start };
   let changed = false;
   const t = text.toLowerCase();
-  const by = /\b(?:by|of)\s+(?:₱|php\s*)?\d/.test(t) || /\badd\s+(?:₱|php\s*)?\d/.test(t) || /\btake\s+(?:₱|php\s*)?\d[\d,.]*\s*k?\s+off\b/.test(t);
+  /*
+   * "by 50", "add 50", "a raise of 50": the amount moves. Not "an allocation
+   * of 50", which says what it is: "add a gym allocation of 50 each tuesday
+   * and thursday" added 50 to Gym's month and asked how 890.00 splits
+   * (16 November 2026 robot).
+   */
+  const by =
+    /\bby\s+(?:₱|php\s*)?\d/.test(t) ||
+    /\b(?:raise|increase|decrease|cut|reduction|bump|top-?up|boost)\s+of\s+(?:₱|php\s*)?\d/.test(t) ||
+    /\badd\s+(?:₱|php\s*)?\d/.test(t) ||
+    /\btake\s+(?:₱|php\s*)?\d[\d,.]*\s*k?\s+off\b/.test(t);
   const up = /\b(?:raise|increase|add|bump|top\s*up|more)\b/.test(t);
   const down = /\b(?:lower|decrease|reduce|cut|less|take)\b/.test(t);
 

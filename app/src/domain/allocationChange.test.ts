@@ -245,3 +245,48 @@ describe("where an allocation is paid from, moved (9 November 2026 sweep)", () =
     expect(after("switch the gas allocation to gcash").find((l) => l.id === "a-gas")!.wallet).toBe("Gcash");
   });
 });
+
+/**
+ * Two readings the 16 November 2026 robot found wrong: "an allocation of 50"
+ * read as "add 50 to it", and "the food allocation" asked back when one line
+ * is called Food and another only counts Food entries.
+ */
+describe("what the allocation is called, and what it is", () => {
+  const gymMonWed = makeAllocation({ name: "Gym", kind: "Self Care", words: "gym", amount: null, each: 7_000, times: 12, per: "time" }, "2026-11", "2026-11-01", "a-gym2");
+  const lunch = makeAllocation({ name: "School Lunch", kind: "Food", words: "School Lunch", amount: 40_000, repeat: true }, "2026-10", "2026-10-01", "a-lunch");
+  const plainFood = makeAllocation({ kind: "Food", amount: null, each: 20_000, times: 4, per: "week" }, "2026-11", "2026-11-01", "a-food2");
+  const c: ChangeContext = { lines: [gas, gymMonWed, lunch, plainFood], reference, transactions, asOf };
+  const press = (text: string): AllocationLine[] => {
+    const r = readAllocationChange(text, c);
+    if (!r || r.kind !== "change") throw new Error(`not a change: ${text} -> ${JSON.stringify(r)}`);
+    const done = applyAllocationChange(c.lines, r.change, { reference, transactions, asOf, newId: () => "new" });
+    if (!done.ok) throw new Error(done.why);
+    return done.lines;
+  };
+
+  it("an allocation of 50 each Tuesday and Thursday is 50 a session on those days, not 50 more for the month", () => {
+    expect(readAllocationChange("add a gym allocation of 50 each tuesday and thursday", c)?.kind).toBe("change");
+    const gym = press("add a gym allocation of 50 each tuesday and thursday").find((l) => l.name === "Gym" && !l.removedOn);
+    expect(gym?.each).toBe(5_000);
+    expect(gym?.per).toBe("day");
+    expect(gym?.days).toEqual([2, 4]);
+  });
+
+  it("raised by an amount is still a raise", () => {
+    const r = readAllocationChange("raise the gas allocation by 50 a week", c);
+    expect(r?.kind).toBe("change");
+  });
+
+  it("the food allocation is the one called Food, not School Lunch that counts Food entries", () => {
+    const lines = press("make the food allocation 250 a week");
+    expect(linesIn(lines, "2026-11").find((l) => l.id === "a-food2" || (l.kind === "Food" && !l.name.trim()))?.each).toBe(25_000);
+    expect(linesIn(lines, "2026-11").find((l) => l.name === "School Lunch")?.amount).toBe(40_000);
+    const gone = readAllocationChange("remove the food allocation", c);
+    expect(gone?.kind).toBe("change");
+  });
+
+  it("School Lunch is still found by its name", () => {
+    const r = readAllocationChange("remove the school lunch allocation", c);
+    expect(r?.kind).toBe("change");
+  });
+});

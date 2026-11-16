@@ -296,3 +296,18 @@ describe("a record number, however it is said (7 October 2026)", () => {
     expect(findRows("the 500 food", rows, "2026-10-07")[0]?.row.id).toBe("b");
   });
 });
+
+/** "put it back" right after a delete in the chat (16 November 2026 robot). */
+describe("putting back what was just deleted", () => {
+  it.each(["put it back", "bring it back", "put that back", "get it back", "put the entry back", "bring that one back"])("%s", (s) => {
+    expect(detectRecall(s)).toEqual({ action: "restore", phrase: "" });
+  });
+  it("still reads the plain ones", () => {
+    expect(detectRecall("put back the coffee entry")?.action).toBe("restore");
+    expect(detectRecall("restore it")?.action).toBe("restore");
+  });
+  it("a figure between is an entry, not a put back", () => {
+    expect(detectRecall("put 500 back in maya")).toBeNull();
+    expect(detectRecall("bring 200 back to cash")).toBeNull();
+  });
+});
