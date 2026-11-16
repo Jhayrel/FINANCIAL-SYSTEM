@@ -230,7 +230,8 @@ export function coverWords(s: AllocationStatus, text: string, asOf: IsoDate, pha
   const rest = Math.max(0, line.times - used);
   const noun = /\b(session|class|visit|ride|trip|lesson|game|round)(?:e?s)?\b/i.exec(text)?.[1]?.toLowerCase() ?? (line.per === "day" ? "day" : "time");
   const end = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
-  const out: string[] = [`To last until ${formatMedium(end)}: ${rest} more ${plural(rest, noun)} counted (${line.times} less the ${used} used), with ${formatMoney(Math.max(0, left))} left.`];
+  // A different question from whether the money is there: whether the amount set is enough for the times counted.
+  const out: string[] = [`Whether ${s.name}'s amount is enough for its ${plural(2, noun)} (a different question from whether the money is there): to last until ${formatMedium(end)}, ${rest} more ${plural(rest, noun)} counted (${line.times} less the ${used} used), with ${formatMoney(Math.max(0, left))} left.`];
   const option = (price: number, why: string): { readonly total: number; readonly more: number } => {
     const need = rest * price;
     const more = Math.max(0, need - Math.max(0, left));
@@ -327,7 +328,43 @@ export function weeksWords(s: AllocationStatus, asOf: IsoDate, phase: MonthAlloc
 }
 
 /** The answer, said plainly. */
-export function allocationWords(text: string, month: MonthAllocations, safe: { readonly safe: number; readonly perDay: number } | null, asOf?: IsoDate): string {
+/** Safe to spend, and what it is made of, for the allocation answers. */
+export interface SafeForAllocations {
+  readonly safe: number;
+  readonly perDay: number;
+  /** What the spending wallets hold, and what is set aside out of it, when known. */
+  readonly wallets?: number | undefined;
+  readonly bills?: number | undefined;
+  readonly debts?: number | undefined;
+  readonly plans?: number | undefined;
+}
+
+/**
+ * Whether the money held covers the allocations, said first and plainly.
+ *
+ * The owner, 15 November 2026: "Does my allocation can be still covered?"
+ * was answered No, twice: safe to spend was set against the allocations, as
+ * if they still had to come out of it, when it is what is left after them.
+ * The wallets against everything set aside is the answer, worked out here.
+ */
+export function coveredWords(month: MonthAllocations, safe: SafeForAllocations): string | null {
+  if (month.phase !== "running" || safe.wallets === undefined) return null;
+  const held = month.lines.reduce((sum, l) => sum + Math.max(0, l.held), 0);
+  if (held <= 0) return null;
+  const other = [
+    safe.bills ? `${formatMoney(safe.bills)} for bills and subscriptions still to pay` : "",
+    safe.debts ? `${formatMoney(safe.debts)} for debt payments due` : "",
+    safe.plans ? `${formatMoney(safe.plans)} for plans` : "",
+  ].filter(Boolean);
+  const free = safe.wallets - (safe.bills ?? 0) - (safe.debts ?? 0) - (safe.plans ?? 0) - held;
+  const parts = [...other, `${formatMoney(held)} for the allocations`];
+  const setAside = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
+  return free >= 0
+    ? `Covered: yes, every allocation is covered by money held now. The spending wallets hold ${formatMoney(safe.wallets)}; out of that, ${setAside} are set aside, and ${formatMoney(free)} is left over, which is safe to spend. Safe to spend is what is left after the allocations, so it is never set against them: the allocations do not come out of it again.`
+    : `Covered: not fully. The spending wallets hold ${formatMoney(safe.wallets)}, and ${setAside} are set aside out of that, which is ${formatMoney(-free)} more than the wallets hold. Until money comes in, ${formatMoney(-free)} of what is set aside is not there.`;
+}
+
+export function allocationWords(text: string, month: MonthAllocations, safe: SafeForAllocations | null, asOf?: IsoDate): string {
   if (month.lines.length === 0) {
     // A month that has ended cannot take one, so it is not offered.
     if (month.phase === "past") return `You had no allocations for ${monthWords(month.month)}.`;
@@ -348,6 +385,9 @@ export function allocationWords(text: string, month: MonthAllocations, safe: { r
   } else {
     parts.push(monthWordsFor(month));
   }
+  // Whether the money held covers them, first, so it is the answer and not a guess.
+  const covered = safe ? coveredWords(month, safe) : null;
+  if (covered) parts.push(covered);
   /*
    * For every line counted in times: what it takes to last the month, and
    * week by week when weeks are asked about (`coverWords`, `weeksWords`).
@@ -459,5 +499,5 @@ export function followsAllocation(text: string): boolean {
   if (/^\s*(?:please\s+)?(?:set|change|update|copy|make)\b/i.test(t) && /\bbudget\b/i.test(t) && MONTH_SAID.test(t)) return false;
   // Another subject altogether: "how much did I spend on food this month" is not about the gym.
   if (/\b(?:spend|spent|spending|income|earn\w*|balance|bills?|subscriptions?|debts?|owe|planner|chart|graph|pie|trend|entries|transactions?|records?|last\s+(?:week|month|year)|yesterday|today)\b/i.test(t) && !/\b(?:allocat\w*|sessions?|visits?)\b/i.test(t)) return false;
-  return /\b(?:add|up|raise|higher|lower|increase|decrease|more|less|cover|enough|afford|safe|propos\w*|recommend\w*|suggest\w*|per\s+(?:session|week|time|visit)|a\s+(?:session|week)|sessions?|visits?|budget|how\s+much|weeks?|weekly|month'?s?\s+end|end\s+of\s+the\s+month|until|last|calculation|computation|worked?\s+(?:it\s+)?out|accurate|off|short|solution|instead)\b/i.test(t);
+  return /\b(?:add|up|raise|higher|lower|increase|decrease|more|less|cover|enough|afford|safe|propos\w*|recommend\w*|suggest\w*|per\s+(?:session|week|time|visit)|a\s+(?:session|week)|sessions?|visits?|budget|how\s+much|weeks?|weekly|month'?s?\s+end|end\s+of\s+the\s+month|until|last|calculations?|computation|worked?\s+(?:it\s+)?out|accurate(?:ly)?|off|short|solution|instead|why|covered)\b/i.test(t);
 }

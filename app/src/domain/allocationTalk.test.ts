@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { allocationMeant, allocationWords, coverWords, followsAllocation, lineTalkedAbout, weeksWords } from "./allocationAsk";
+import { allocationMeant, allocationWords, coveredWords, coverWords, followsAllocation, lineTalkedAbout, weeksWords } from "./allocationAsk";
 import { readAllocationChange } from "./allocationChange";
 import { makeAllocation, monthAllocations } from "./monthAllocation";
 import { readIncomeIf } from "./whatIfAsk";
@@ -27,7 +27,7 @@ const line = month.lines.find((l) => l.line.id === "a-swim")!;
 describe("what it takes to last the month", () => {
   it("at its share and at what the uses so far cost, and what each takes from safe to spend", () => {
     const words = coverWords(line, "is my allocation enough", asOf, month.phase, 20_000)!;
-    expect(words).toContain("To last until November 30, 2026: 6 more times counted (8 less the 2 used), with ₱270.00 left.");
+    expect(words).toContain("to last until November 30, 2026, 6 more times counted (8 less the 2 used), with ₱270.00 left.");
     expect(words).toContain("- At ₱50.00 each, its share: ₱300.00 for the 6, ₱30.00 more than is left, so ₱430.00 in all.");
     expect(words).toContain("- At ₱65.00 each, what the 2 so far cost on average: ₱390.00 for the 6, ₱120.00 more than is left, so ₱520.00 in all.");
     expect(words).toContain("Raising it sets the extra aside now, out of safe to spend (₱200.00): ₱170.00 at ₱430.00; ₱80.00 at ₱520.00.");
@@ -46,8 +46,18 @@ describe("what it takes to last the month", () => {
   });
   it("is said with the allocation's answer, for a line counted in times only", () => {
     const words = allocationWords("is my allocation accurate?", month, { safe: 20_000, perDay: 0 }, asOf);
-    expect(words).toContain("To last until November 30, 2026");
+    expect(words).toContain("to last until November 30, 2026");
     expect(coverWords(month.lines.find((l) => l.line.id === "a-fare")!, "", asOf, month.phase, 0)).toBeNull();
+  });
+  it("says first whether the money held covers them, never safe to spend against them", () => {
+    const held = month.lines.reduce((sum, l) => sum + Math.max(0, l.held), 0);
+    const yes = coveredWords(month, { safe: 20_000, perDay: 0, wallets: held + 30_000, bills: 10_000, plans: 0 })!;
+    expect(yes).toMatch(/^Covered: yes, every allocation is covered by money held now\./);
+    expect(yes).toContain("and ₱200.00 is left over, which is safe to spend.");
+    const no = coveredWords(month, { safe: 0, perDay: 0, wallets: held - 5_000 })!;
+    expect(no).toMatch(/^Covered: not fully\./);
+    expect(no).toContain("₱50.00 more than the wallets hold");
+    expect(allocationWords("can my allocations still be covered?", month, { safe: 20_000, perDay: 0, wallets: held + 30_000, bills: 10_000 }, asOf)).toContain("Covered: yes");
   });
 });
 

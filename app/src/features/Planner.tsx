@@ -388,6 +388,11 @@ export function Planner(props: PlannerProps) {
           onMove={() => setMoving(current.plan)}
           onLink={() => setLinking(current.plan)}
           onSkip={() => setClosing({ plan: current.plan, how: "skip" })}
+          onSettle={() => {
+            const done = linkPayments(current.plan, [], transactions, asOf, true);
+            const paid = paidSoFar(done, transactions).amount;
+            props.onChange(done, "plan.paid", `Marked "${current.plan.title}" paid in full: it cost ${formatMoney(paid)}, ${formatMoney(Math.max(0, current.plan.amount - paid))} less than planned.`);
+          }}
           onRemove={() => setClosing({ plan: current.plan, how: "remove" })}
           onReopen={() => {
             const back = reopenPlan(current.plan);
@@ -522,6 +527,7 @@ export function Planner(props: PlannerProps) {
           plan={closing.plan}
           how={closing.how}
           dialog={!phone}
+          effect={closeEffect(viewOf(closing.plan, { transactions, accounts, asOf }))}
           onClose={() => setClosing(null)}
           onDone={(reason) => {
             const p = closing.plan;
@@ -671,6 +677,8 @@ function PlanSheet(props: {
   onMove: () => void;
   onLink: () => void;
   onSkip: () => void;
+  /** Paid for less than planned: closed as paid, nothing more to pay. */
+  onSettle: () => void;
   onRemove: () => void;
   onReopen: () => void;
   onAgain: () => void;
@@ -715,8 +723,35 @@ function PlanSheet(props: {
         Plan it again
       </Button>
     );
+  /*
+   * Paid for less than planned: one press closes it, asked first, and it can
+   * be opened again from Done. A payment a little under a plan's amount
+   * left it "Part paid" with the small rest set aside and nothing to press but
+   * "Pay the rest" (owner, 14 November 2026: "make sure i can complete
+   * payment even half way and revert if click accident or add validation").
+   */
+  const costLess = open && v.paid > 0 && v.left > 0 && !isSave(p) && !paysDebt(p);
+  const settle = (): void => {
+    void confirm({
+      title: `Mark "${p.title}" paid in full?`,
+      body: `It cost ${formatMoney(v.paid)}, ${formatMoney(v.left)} less than the ${formatMoney(p.amount)} planned. The plan goes under Done as paid${p.setAside && v.counts ? `, and the ${formatMoney(v.left)} stops being set aside in safe to spend` : ""}. No money moves. "Open it again" on the plan puts it back.`,
+      confirmLabel: "Mark it paid",
+    }).then((ok) => {
+      if (ok) props.onSettle();
+    });
+  };
+  const unlink = (t: Transaction): void => {
+    void confirm({
+      title: `Unlink ${no(t.recordNumber)} from "${p.title}"?`,
+      body: `The entry stays in your records as it is; only the link goes. The plan then has ${formatMoney(Math.min(p.amount, v.left + (isSave(p) ? t.amount : t.total)))} to ${isSave(p) ? "move" : "pay"} again${p.setAside ? ", set aside in safe to spend as before" : ""}. "Link a payment I added" puts it back.`,
+      confirmLabel: "Unlink it",
+    }).then((ok) => {
+      if (ok) props.onUnlink(t.id);
+    });
+  };
   const rows: SheetAction[] = open
     ? [
+        ...(costLess ? [{ label: "It cost less: mark it paid", icon: "check" as const, run: settle }] : []),
         { label: "Edit", icon: "edit", run: props.onEdit },
         { label: "Move the date", icon: "planner", run: props.onMove },
         { label: "Link a payment I added", icon: "ledger", run: props.onLink },
@@ -887,7 +922,7 @@ function PlanSheet(props: {
                   </button>
                   <Money value={isSave(p) ? t.amount : t.total} size="s" />
                   {open && (
-                    <Button size="sm" onClick={() => props.onUnlink(t.id)}>
+                    <Button size="sm" onClick={() => unlink(t)}>
                       Unlink
                     </Button>
                   )}
@@ -1114,7 +1149,7 @@ export function PlanForm(props: {
     : paying
       ? // A line whose payment safe to spend holds back already is never held back twice.
         { title, amount, due, dueKind: when.kind, item: "", wallet, debtId: debtId || undefined, paying: true, need: true, setAside: setAside && !line?.scheduled, notes }
-      : { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal && !recurring, notes };
+      : { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal, notes };
   // The payments linked to the plan being edited: of the other kind, they stop a change between spending and saving.
   const linkedRows = useMemo(() => (editing && isEdit ? props.transactions.filter((t) => editing.entryIds.includes(t.id)) : []), [editing, isEdit, props.transactions]);
   // What is paid on it already: its amount may not go below that, and at exactly that it is paid in full.
@@ -1141,7 +1176,8 @@ export function PlanForm(props: {
   // The goal it would get, or the one picked, checked and said before anything is made (`planGoal.ts`).
   const goalPlan = newGoal || goalId ? goalForPlan({ id: editing?.id, title, amount, due, dueKind: when.kind }, { accounts, plans: props.plans, transactions: props.transactions, asOf, parentId: goalHome, goalId: newGoal ? undefined : goalId }) : null;
   const goalName = newGoal ? (goalPlan?.name ?? title.trim()) : (goals.find((g) => g.id === goalId)?.name ?? "");
-  const counted = saving ? setAside && outOfSpending : paying ? setAside && !line?.scheduled : setAside && !goalId && !newGoal && !recurring;
+  // A plan for a bill is set aside like any other: safe to spend holds it once, less what the bills still to pay already hold (`monthPlan.ts`).
+  const counted = saving ? setAside && outOfSpending : paying ? setAside && !line?.scheduled : setAside && !goalId && !newGoal;
   const debtProblem = check.problems.find((x) => x.startsWith("Pick the loan") || x.includes("debt line is no longer") || x.includes("not a repayment") || x.includes("are not repayments") || x.includes("repayments on a debt") || x.includes("is a repayment on a debt"));
   const intoProblem = check.problems.find((x) => x.startsWith("Pick the account") || x.includes(" and comes from ") || x.includes("is closed in Settings"));
   const kindProblem = check.problems.find((x) => x.includes("linked as its payment"));
@@ -1449,8 +1485,8 @@ export function PlanForm(props: {
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   {goalId
                     ? "Its money is in the goal already, so it is not counted."
-                    : recurring
-                      ? "Bills and subscriptions are set aside already every month."
+                    : recurring && counted
+                      ? "On: set aside in its month. When this bill is already among the bills still to pay, it is held once, not twice."
                       : when.kind === "none"
                         ? "Once it has a month or a day, it is set aside like a bill still to pay."
                         : counted
@@ -1883,7 +1919,18 @@ function LinkSheet(props: {
   );
 }
 
-function CloseSheet(props: { plan: Plan; how: "skip" | "remove"; dialog: boolean; onClose: () => void; onDone: (reason: string) => void }) {
+/** What skipping or removing a plan does to safe to spend, in a sentence. */
+function closeEffect(v: PlanView): string {
+  const p = v.plan;
+  if (v.left <= 0) return "Nothing is left to pay on it, so safe to spend does not change.";
+  if (v.counts) return `Safe to spend is holding ${formatMoney(v.left)} back for it now. That money is free again the moment it is closed, so safe to spend on the Dashboard goes up by ${formatMoney(v.left)}.`;
+  if (p.goalId) return "Its money is saved in a goal, apart from safe to spend, so the Dashboard does not change.";
+  if (!p.setAside) return "It is not counted in safe to spend (that switch is off on the plan), so the Dashboard's figures do not change.";
+  if (p.due === NO_DATE) return "It has no date yet, so nothing is held back for it and the Dashboard's figures do not change.";
+  return "It is due after this month, so nothing is held back for it yet and the Dashboard's figures do not change today.";
+}
+
+function CloseSheet(props: { plan: Plan; how: "skip" | "remove"; dialog: boolean; effect: string; onClose: () => void; onDone: (reason: string) => void }) {
   const [reason, setReason] = useState("");
   const skip = props.how === "skip";
   return (
@@ -1907,6 +1954,10 @@ function CloseSheet(props: { plan: Plan; how: "skip" | "remove"; dialog: boolean
         </>
       }
     >
+      {/* What it does to the Dashboard, said before it is pressed (owner, 15 November 2026: "I skip in planner and the equation in dashboard haven't changed"). */}
+      <p className="t-caption" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-2)" }}>
+        {props.effect}
+      </p>
       <Field label="Why" optional>
         <TextInput value={reason} onChange={setReason} maxLength={120} placeholder={skip ? "Changed my mind, found it cheaper" : "Added by mistake"} />
       </Field>

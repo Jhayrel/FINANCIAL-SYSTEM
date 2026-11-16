@@ -7031,7 +7031,7 @@ export function AskPanel({
         log(aiEvent("asked", "add", { text: note }));
         // A follow-up is about the line being talked about, named so the words are about it.
         const about = allocationTalk && talkedLine && linesNamed(allocNote, month.lines.map((l) => l.line)).length === 0 ? `${allocNote} (${talkedLine.name} allocation)` : allocNote;
-        const words = allocationWords(about, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null, asOf);
+        const words = allocationWords(about, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay, wallets: brief.safe.wallets, bills: brief.safe.reservedBills, debts: brief.safe.reservedDebt, plans: brief.safe.reservedPlans } : null, asOf);
         /*
          * Drawn beside the words when a picture helps (owner, 9 November
          * 2026): asked for by name, every allocation at once, or how many
@@ -13582,6 +13582,8 @@ export function AskPanel({
             const base = editing.before ?? (settings.plans ?? []).find((p) => p.id === editing.plan.id) ?? editing.plan;
             const next: Plan = creating ? { ...makePlan(input, asOf, "ai"), id: editing.plan.id, createdOn: editing.plan.createdOn } : editPlan(base, input, asOf, transactions);
             sink.savePlan?.(next, creating ? "plan.create" : "plan.update", creating ? `Planned "${next.title}", ${formatMoney(next.amount)} ${byWhen(next)}, from the chat, filled in by hand.` : `Edited "${next.title}" from the chat, by hand.`);
+            // "Now record that plan paid", "move it": the plan just saved is the one meant (14 November 2026: "No plan by that name").
+            planFocus.current = { id: next.id, at: Date.now() };
             const done: Settling = { ...card, state: "applied", words: creating ? "Added to the planner, as you filled it in." : "Saved, as you filled it in.", planner: { rows: planRows(next) } };
             recordCard(done);
             setTurns((prev) => prev.map((t) => (isSettling(t) && t.cardId === editing.cardId ? done : t)));

@@ -518,7 +518,7 @@ export function checkPlan(
   }
   if (kind === "none" && input.setAside && !input.goalId) notes.push("With no date it is counted nowhere yet: not in safe to spend, not in a month's budget. Give it a month or a day when you know, and it counts there.");
   if (input.setAside && isRecurringKind(input.item, context.reference)) {
-    notes.push(`${input.item} is a bill or subscription, already set aside every month. Counting this plan in safe to spend too would set the money aside twice.`);
+    notes.push(`${input.item} is a bill or subscription. When it is already among the bills still to pay that month, safe to spend holds it once, not twice.`);
   }
   if (input.setAside && input.goalId) notes.push("Its money is saved in the goal, apart from the spending wallets, so it is not counted in safe to spend.");
   return { problems, notes };
@@ -883,6 +883,42 @@ export function closedViews(views: readonly PlanView[]): { readonly done: readon
 export function plansSetAside(views: readonly PlanView[]): { readonly total: Centavos; readonly views: readonly PlanView[] } {
   const counted = views.filter((v) => v.counts).sort((a, b) => a.plan.due.localeCompare(b.plan.due));
   return { total: counted.reduce((s, v) => s + v.left, 0), views: counted };
+}
+
+/**
+ * What plans that were set aside covered of today's spending.
+ *
+ * A plan counted in safe to spend holds its money back like a bill still to
+ * pay, so paying it leaves the wallets and the money held together: the
+ * total is unchanged. Today's share was not: the owner, 14 November 2026,
+ * paid a set-aside plan and the Dashboard read "Safe to spend today PHP
+ * 0.00", the whole payment "over today's" share ("it declined my budget but
+ * I set it safe to spend"). What a set-aside plan's payment covered is taken
+ * off today's spending, up to the plan's amount, as an allocation's is
+ * (docs/17-ALLOCATIONS.md, A5). `skip` leaves out a row an allocation
+ * already covers, so it is never taken off twice.
+ */
+export function plansCoveredToday(
+  plans: readonly Plan[],
+  rows: readonly Transaction[],
+  asOf: IsoDate,
+  spendingWallets: ReadonlySet<string>,
+  skip: (t: Transaction) => boolean = () => false,
+): Centavos {
+  const transactions = wholeRows(rows);
+  const byId = new Map(transactions.map((t) => [t.id, t]));
+  const monthEnd = `${asOf.slice(0, 8)}31`;
+  let covered = 0;
+  for (const p of plans) {
+    // Held back before today: set aside, not in a goal, due this month or before, and not thrown away.
+    if (!p.setAside || p.goalId || p.status === "removed" || p.status === "skipped" || p.due > monthEnd || isSave(p) || paysDebt(p)) continue;
+    const paid = p.entryIds.map((id) => byId.get(id)).filter((t): t is Transaction => t !== undefined && t.type === "Spending");
+    const today = paid.filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet) && !skip(t));
+    if (today.length === 0) continue;
+    const before = paid.filter((t) => t.date < asOf).reduce((sum, t) => sum + t.total, 0);
+    covered += Math.min(today.reduce((sum, t) => sum + t.total, 0), Math.max(0, p.amount - before));
+  }
+  return covered;
 }
 
 /** The plans open in a month ahead, for what that month needs (P5, `budgetAdvice` `planned`). */

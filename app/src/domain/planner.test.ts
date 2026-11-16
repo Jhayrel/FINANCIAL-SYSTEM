@@ -281,7 +281,8 @@ describe("what the form says (P4.14 to P4.17)", () => {
   it("notes a date passed, the same plan twice, a bill set aside twice, a goal", () => {
     expect(checkPlan(input({ due: "2026-10-01" }), { plans: [], reference, asOf }).notes[0]).toMatch(/already passed/);
     expect(checkPlan(input({}), { plans: [existing], reference, asOf }).notes[0]).toMatch(/already planned for November/);
-    expect(checkPlan(input({ title: "Globe", item: "Globe" }), { plans: [], reference, asOf }).notes[0]).toMatch(/aside twice/);
+    // A bill's plan is held once: only the part past what the bills still to pay already hold (`monthPlan.ts`, 15 November 2026).
+    expect(checkPlan(input({ title: "Globe", item: "Globe" }), { plans: [], reference, asOf }).notes[0]).toMatch(/holds it once, not twice/);
     expect(makePlan(input({ goalId: "g1" }), asOf, "owner").setAside).toBe(false);
   });
 });

@@ -185,7 +185,8 @@ function thingIn(text: string): string {
    */
   thing =
     // "eat outside tomorrow I know I can afford it but should I ..." is eating out (owner, 1 November 2026).
-    thing.split(/\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really|know|can|could|already|am|have)\b|\s+but\s+(?:i|we|should|is|it|maybe)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b|\s+(?:let\s+me\s+know|tell\s+me|what\s+do\s+you\s+think|any\s+(?:advice|thoughts?)|please|pls)\b/i)[0] ?? thing;
+    // "motor oil for my motorcycle my budget is 300": what it may cost is not its name (14 November 2026, titled "... my budget is").
+    thing.split(/\s+(?:and\s+)?(?:my|the|our|with\s+a|on\s+a)\s+budget\b|\s+budget\s+(?:is|of|ko)\b|\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really|know|can|could|already|am|have)\b|\s+but\s+(?:i|we|should|is|it|maybe)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b|\s+(?:let\s+me\s+know|tell\s+me|what\s+do\s+you\s+think|any\s+(?:advice|thoughts?)|please|pls)\b/i)[0] ?? thing;
   // "iphone 18 pro max": the model number is the name, kept through the cleaning below and put back (`modelNumbers.ts`).
   const models = protectModels(thing);
   thing = models.text;
@@ -305,7 +306,8 @@ export function planInputFor(title: string, amount: Centavos | null, due: IsoDat
     item: kind,
     wallet,
     need: !WANTS.test(`${title} ${said}`),
-    setAside: !isRecurringKind(kind, ctx.reference),
+    // A bill's plan is held like any other; safe to spend holds it once (`monthPlan.ts`).
+    setAside: true,
     notes: "",
   };
 }

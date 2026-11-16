@@ -225,8 +225,18 @@ export const isAdvice = (text: string): boolean => ADVICE.test(text.trim()) || W
 const RATE_OR_WOULD =
   /\b(?:would|that'?d|it'?d)\b(?!\s+(?:like|love|want))|\b(?:per|each|every|a)\s+(?:session|visit|class|lesson)\b|\b\d+\s*x\s*(?:a|per|each|every)\s+(?:week|day|month)\b|\b(?:once|twice|thrice|\d+\s+times)\s+(?:a|per|each|every)\s+(?:week|day|month)\b/i;
 
-/** A rate, or what something would do, with nothing said to have happened. */
-export const talksRate = (text: string): boolean => RATE_OR_WOULD.test(text) && !HAPPENED.test(text);
+/*
+ * Working something out aloud: "My balance in cash is 1500+ and i need gas
+ * 500 means its covered then 670 gym its covered ... Run it" became a Gas
+ * card and a Food card (owner, 15 November 2026). What is needed, what
+ * something means, what is covered, and a request to run the figures are
+ * reasoning, never money that moved.
+ */
+const REASONS_ALOUD =
+  /\b(?:means|its\s+covered|it'?s\s+covered|(?:is|are|be)\s+covered|covered\s+(?:by|using|with|na)|i\s+need|we\s+need|needs?\s+to|run\s+it|run\s+(?:the|some|an?|your)\s+(?:numbers?|figures?|calculations?|analysis|math)|calculate|compute|work\s+(?:it|this|that)\s+out|my\s+balance\s+(?:in|is|on))\b/i;
+
+/** A rate, what something would do, or figures reasoned about, with nothing said to have happened. */
+export const talksRate = (text: string): boolean => (RATE_OR_WOULD.test(text) || REASONS_ALOUD.test(text)) && !HAPPENED.test(text);
 
 /**
  * An instruction to change a budget, which the assistant does not carry out.

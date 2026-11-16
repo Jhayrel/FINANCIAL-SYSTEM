@@ -161,7 +161,7 @@ export function AddTransaction({
   onSave: (rows: Transaction[], by?: Provenance) => void;
   /** A new entry counted as an open plan's payment, once saved (`planPaidBy`). */
   /** `makesSaving`: the plan was saved as spending, and its words name the account the money went into (`misfiledSaving`). */
-  onLinkPlan?: ((plan: Plan, rows: readonly Transaction[], makesSaving?: string) => void) | undefined;
+  onLinkPlan?: ((plan: Plan, rows: readonly Transaction[], makesSaving?: string, settles?: boolean) => void) | undefined;
   onUpdate: (rows: Transaction[], by?: Provenance) => void;
   /** A year's budget replaced, when the assistant sets one. */
   onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
@@ -968,6 +968,16 @@ export function AddTransaction({
   }, [editing, reference.plans, transactions]);
   const [linkChoice, setLinkChoice] = useState<{ readonly planId: string; readonly on: boolean } | null>(null);
   const linkOn = planMatch ? (linkChoice?.planId === planMatch.plan.id ? linkChoice.on : planMatch.sure) : false;
+  /*
+   * Paying a plan for less than planned: whether that is all it cost. A
+   * payment a little under the plan's amount left it part paid, the small
+   * rest still set aside (owner, 14 November 2026). On by itself only for a small
+   * difference (a tenth of the plan, or PHP 50.00), always shown, and the
+   * plan can be opened again.
+   */
+  const planShort = planMatch && linkOn && draft.flow === "Spending" && !planMatch.plan.into && !planMatch.makesSaving ? planMatch.left - ((draft.amount ?? 0) + draft.fee) : 0;
+  const [settleChoice, setSettleChoice] = useState<{ readonly planId: string; readonly on: boolean } | null>(null);
+  const settles = planMatch !== null && planShort > 0 ? (settleChoice?.planId === planMatch.plan.id ? settleChoice.on : planShort <= Math.max(5000, Math.round(planMatch.plan.amount / 10))) : false;
   const covering = draft.flow === "Spending" && draft.coversTo !== undefined;
   const coverHere = draft.flow === "Spending" && !covering && (draft.amount ?? 0) > 0 && !draft.id ? (coversOn(draft.date, transactions, draft.id)[0] ?? null) : null;
   /*
@@ -1706,7 +1716,7 @@ export function AddTransaction({
     } else {
       const saved = draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit);
       onSave(saved);
-      if (planMatch && linkOn) onLinkPlan?.(planMatch.plan, saved, planMatch.makesSaving);
+      if (planMatch && linkOn) onLinkPlan?.(planMatch.plan, saved, planMatch.makesSaving, settles);
       // Paid from the money an entry over several days already counts: taken out of it, so it is counted once.
       const cover = takeOut && coverHere?.id === takeOut && sameWallet ? transactions.find((t) => t.id === takeOut) : undefined;
       const spent = saved.reduce((a, t) => a + t.total, 0);
@@ -1714,6 +1724,7 @@ export function AddTransaction({
     }
     setTakeOut(null);
     setLinkChoice(null);
+    setSettleChoice(null);
 
     // The card that supplied this row can now say it was saved, and as which number.
     onSaved({ draft: final, at: Date.now(), recordNumber: target ? target.recordNumber : nextRecordNumber, ...(fromCard.current ? { cardId: fromCard.current } : {}) });
@@ -2728,12 +2739,23 @@ export function AddTransaction({
                         : (() => {
                             // A repayment counts with its interest, never a fee; spending with its fee (P12).
                             const counts = draft.flow === "Debt" ? (draft.amount ?? 0) + (draft.interest ?? 0) : (draft.amount ?? 0) + draft.fee;
-                            return `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${counts >= planMatch.left ? "the plan is marked paid" : `${formatMoney(planMatch.left - counts)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? ", and safe to spend stops setting this money aside" : ""}.`;
+                            return `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${counts >= planMatch.left ? "the plan is marked paid" : settles ? `the plan is marked paid, ${formatMoney(planMatch.left - counts)} less than planned` : `${formatMoney(planMatch.left - counts)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? (counts >= planMatch.left || settles ? ", and safe to spend stops setting its money aside" : ", and that part stays set aside") : ""}.`;
                           })()
                       : `Off: saved as an entry only. The plan stays open${planMatch.plan.setAside && !planMatch.plan.goalId ? " and its money stays set aside" : ""}.`}
                   </span>
                 </span>
                 <Switch checked={linkOn} onChange={(on) => setLinkChoice({ planId: planMatch.plan.id, on })} label={`Count it as the "${planMatch.plan.title}" plan's payment`} />
+                {planShort > 0 && (
+                  <>
+                    <span className="fms-planform-switchtext">
+                      <span className="t-body">That is all it cost</span>
+                      <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                        {settles ? `On: nothing more to pay. The plan closes as paid, ${formatMoney(planShort)} under what was planned.` : `Off: ${formatMoney(planShort)} is still to pay, and the plan stays open for it.`}
+                      </span>
+                    </span>
+                    <Switch checked={settles} onChange={(on) => setSettleChoice({ planId: planMatch.plan.id, on })} label="That is all it cost: mark the plan paid" />
+                  </>
+                )}
                 {/* What the plan already knows, one tap away when the form has it blank. */}
                 {linkOn && ((!draft.item && planMatch.plan.item) || (!draft.fromWallet && planMatch.plan.wallet && reference.wallets.concat(reference.savings).includes(planMatch.plan.wallet))) && (
                   <button

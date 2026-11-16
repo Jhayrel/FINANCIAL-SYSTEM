@@ -2837,13 +2837,14 @@ export default function App() {
               uid={cloud.uid ?? null}
               sync={{ signedIn: Boolean(cloud.uid), online, pending }}
               onSave={handleSave}
-              onLinkPlan={(found, rows, makesSaving) => {
+              onLinkPlan={(found, rows, makesSaving, settles) => {
                 // Typed on the Add form, counted as the plan's payment (`planPaidBy`).
                 const all = [...transactions, ...rows];
                 // Saved as spending, named as a saving into where this went: made one first, as the form said (`misfiledSaving`).
                 const plan = makesSaving ? asSaving(found, makesSaving, reference.wallets, all, asOf) : found;
                 const paying = rows.filter((r) => paysPlan(plan, r));
-                const linked = linkPayments(plan, paying.map((r) => r.id), all, asOf);
+                // "That is all it cost" on the form: closed as paid, for less than planned.
+                const linked = linkPayments(plan, paying.map((r) => r.id), all, asOf, Boolean(settles));
                 // A plan to save is done by what was moved, never its fee (P11), and said as moved.
                 const saving = isSave(plan);
                 const paid = Math.max(0, paidSoFar(linked, all).amount - paidSoFar(plan, transactions).amount);
@@ -2853,7 +2854,7 @@ export default function App() {
                   "plan.paid",
                   saving
                     ? `${makesSaving ? `Made "${plan.title}" a plan to save into ${plan.into}. ` : ""}Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}", ${no}, from the Add form${linked.status === "done" ? "" : ", more to move"}.`
-                    : `Paid "${plan.title}": ${formatMoney(paid)}, ${no}, from the Add form${linked.status === "done" ? "" : ", more to pay"}.`,
+                    : `Paid "${plan.title}": ${formatMoney(paid)}, ${no}, from the Add form${linked.status === "done" ? (linked.settled ? `, ${formatMoney(Math.max(0, plan.amount - paidSoFar(linked, all).amount))} less than planned, paid in full` : "") : ", more to pay"}.`,
                   BY_OWNER,
                 );
               }}

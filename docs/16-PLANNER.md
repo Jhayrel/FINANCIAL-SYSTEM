@@ -94,9 +94,13 @@ entries and the wallets, never stored:
    instead.
 15. **The same thing planned twice.** A plan with the same name and month as
    an open one is flagged on its form before saving.
-16. **A plan for a bill or subscription.** Bills are already set aside every
-   month. Counting a plan for the same bill would set the money aside twice,
-   so its form says so and turns "Count it in safe to spend" off.
+16. **A plan for a bill or subscription.** Held like any other plan, once:
+   when that bill is already among the bills still to pay in the month, safe
+   to spend holds only the part of the plan past what the bill already
+   holds. Changed on 15 November 2026: the form used to turn "Count it in
+   safe to spend" off for every bill, so a plan for a bill that was not among
+   the bills still to pay ("Electric Bill") was held nowhere, and skipping
+   it changed nothing on the Dashboard.
 17. **A plan saved in a goal** ("new phone for 2027", saved in a Phone fund
    goal). The goal is linked. The plan shows what the goal holds against what
    is left to pay and what it takes a month to get there. Its money is
@@ -481,3 +485,20 @@ entry, ₱1,500.00 of "Random necessities" (#3976). Rules from that day:
    name done is a new plan, not "paid already".
 10. **Skipping a card because it is already in the ledger** offers that entry
    to an open plan it fits ("Count it as moved"), never linked by itself.
+
+## Paying a plan that was set aside (14 and 15 November 2026)
+
+- **Not out of today's share.** A plan counted in safe to spend holds its
+  money back, so what its payment takes from the wallets today was held
+  already: it is left out of "spent today", up to the plan's amount
+  (`plansCoveredToday`), as an allocation's is. The Dashboard says so under
+  the day figure.
+- **Paid for less than planned.** The Add form asks "That is all it cost"
+  when a payment counted for a plan is less than what is left (on by itself
+  for a difference of a tenth of the plan or PHP 50.00, always shown). A
+  part-paid plan's sheet has "It cost less: mark it paid", asked first. Both
+  close it as paid and stop holding the rest; "Open it again" puts it back.
+- **Asked first.** Unlinking a payment is confirmed, saying what it does.
+  Skipping or removing a plan says what it does to safe to spend before it
+  is pressed: how much is freed, or that nothing changes and why.
+

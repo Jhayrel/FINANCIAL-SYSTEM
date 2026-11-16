@@ -358,6 +358,12 @@ export function Dashboard({
                 the figure above does not move, and this says why. Without it
                 ₱300.00 of gas looked unseen (scenario analysis, 9 November 2026).
               */}
+              {/* Paid today on a plan that was set aside: held back already, so not out of today's share (owner, 14 November 2026). */}
+              {safe?.plansCoveredToday !== undefined && safe.plansCoveredToday > 0 && (
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {`${formatMoney(safe.plansCoveredToday)} paid today on a plan that was set aside: it was held back already, so it is not out of today's share.`}
+                </span>
+              )}
               {safe?.allocations && safe.allocations.coveredToday > 0 && (
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   {`${formatMoney(safe.allocations.coveredToday)} spent today came out of ${safe.allocations.lines

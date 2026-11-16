@@ -54,7 +54,7 @@
  * Rounded down, so a daily figure never promises a centavo that is not there.
  */
 
-import { plansSetAside, viewOf } from "./planner";
+import { plansCoveredToday, plansSetAside, viewOf } from "./planner";
 import { wholeRows } from "./covers";
 import { learnPatterns } from "./allocation";
 import { totalSavingsBalance, totalWalletBalance } from "./balances";
@@ -64,7 +64,7 @@ import { debtDue, positionsOf, type Debt, type DebtKind, type DueBasis } from ".
 import { addDays, daysBetween, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { costByKind } from "./kinds";
-import { allocatedIn, monthAllocations, type MonthAllocations } from "./monthAllocation";
+import { allocatedIn, lineFor, linesIn, monthAllocations, type MonthAllocations } from "./monthAllocation";
 import { incomeToCome } from "./incomeBudget";
 import { monthTotals, totalsFor } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -132,6 +132,8 @@ export interface SafeToSpend {
   readonly todayShare: Centavos;
   /** Spent today out of the spending wallets, bills and subscriptions apart (they are set aside already). */
   readonly spentToday: Centavos;
+  /** What plans that were set aside covered of today's spending, already left out of `spentToday`. */
+  readonly plansCoveredToday?: Centavos | undefined;
   /** How far today's spending went past today's share. 0 when it did not. */
   readonly overToday: Centavos;
   /** A day from tomorrow: what is safe over the days after today. 0 on the month's last day. */
@@ -515,9 +517,25 @@ export function monthBrief(input: {
         ? monthAllocations(reference.allocations, transactions, `${year}-${String(month).padStart(2, "0")}`, asOf, planned.views.map((v) => ({ id: v.plan.id, title: v.plan.title, item: v.plan.item, notes: v.plan.notes, left: v.left, counts: v.counts })), spendingWallets)
         : null;
     const plansOut = allocations ? planned.views.filter((v) => !allocations.plansInside.has(v.plan.id)) : planned.views;
-    const reservedPlans = plansOut.reduce((s, v) => s + v.left, 0);
+    /*
+     * A plan for a bill is held like any other, less what the bills still to
+     * pay already hold for that bill, so it is never held twice. A plan for a
+     * bill used to be held nowhere: "Electric Bill", planned for the month and
+     * not among the bills still to pay, was in no figure, and skipping it
+     * changed nothing (owner, 15 November 2026: "I skip in planner and the
+     * equation in dashboard haven't changed").
+     */
+    const billHeld = new Map(bills.bills.filter(isOpenBill).map((b) => [b.item.trim().toLowerCase(), b.amount]));
+    const heldFor = (v: (typeof plansOut)[number]): Centavos => {
+      const key = v.plan.item.trim().toLowerCase();
+      const inBills = billHeld.get(key) ?? 0;
+      if (inBills <= 0) return v.left;
+      billHeld.set(key, Math.max(0, inBills - v.left));
+      return Math.max(0, v.left - inBills);
+    };
+    const plansDue = plansOut.map((v) => ({ id: v.plan.id, title: v.plan.title, left: heldFor(v), due: v.plan.due })).filter((d) => d.left > 0);
+    const reservedPlans = plansDue.reduce((s, d) => s + d.left, 0);
     const reservedAllocations = allocations?.held ?? 0;
-    const plansDue = plansOut.map((v) => ({ id: v.plan.id, title: v.plan.title, left: v.left, due: v.plan.due }));
     const free = wallets - reservedBills - reservedDebt - reservedPlans - reservedAllocations;
     const budgetLeft = tracks.spending.budget > 0 ? tracks.spending.remaining : null;
     /*
@@ -542,7 +560,10 @@ export function monthBrief(input: {
     // What left the wallets today: a date range left them whole on its first day, never a share a day (`wholeRows`).
     const today = totalsFor(wholeRows(transactions).filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet)));
     // What an allocation covered today was set aside already, as a bill paid today is: it does not use today's share (A5).
-    const spentToday = Math.max(0, today.spending + today.fees - (allocations?.coveredToday ?? 0));
+    // And what a plan set aside covered today, the same way: it was held back until it was paid (`plansCoveredToday`).
+    const allocLines = linesIn(reference.allocations, `${year}-${String(month).padStart(2, "0")}`);
+    const plansCovered = plansCoveredToday(reference.plans ?? [], transactions, asOf, spendingWallets, (t) => lineFor(t, allocLines) !== null);
+    const spentToday = Math.max(0, today.spending + today.fees - (allocations?.coveredToday ?? 0) - plansCovered);
     const day = dayFigures(amount, spentToday, daysLeft);
 
     const habits = learnPatterns(transactions, asOf)
@@ -569,6 +590,7 @@ export function monthBrief(input: {
       safe: amount,
       ...day,
       spentToday,
+      ...(plansCovered > 0 ? { plansCoveredToday: plansCovered } : {}),
       limitedBy,
       habits,
     };

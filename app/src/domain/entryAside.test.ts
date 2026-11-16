@@ -40,6 +40,12 @@ describe("asking why is never an entry", () => {
       expect(readEntry(said, history, reference, ASOF).worthOffering, said).toBe(false);
     }
     expect(readEntry("I would like to add snacks 40", history, reference, ASOF).worthOffering).toBe(true);
+    // Reasoning aloud, part by part, as the message is split.
+    for (const said of ["i need fare 500 means its covered", "670 snacks its covered now lunch 400 its covered using cash and wallet b.", "My balance in cash is 1500+ and i need fare 500 means its covered. Run it"]) {
+      expect(detectIntent(said), said).toBe("ask");
+      expect(readEntry(said, history, reference, ASOF).worthOffering, said).toBe(false);
+    }
+    expect(readEntry("bought what I need, snacks 40", history, reference, ASOF).worthOffering).toBe(true);
   });
   it("and an entry is still one", () => {
     expect(readEntry("bought snacks 30", history, reference, ASOF).worthOffering).toBe(true);
