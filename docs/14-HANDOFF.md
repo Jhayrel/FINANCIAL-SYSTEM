@@ -269,7 +269,7 @@ any size. All pushed.
 | "by year" after an income chart drew spending; "trend of income" after a spending chart drew both | A follow-up keeps its direction; a new one replaces it | `4f9bc03` |
 | A pie in the chat column read "Onlin...", "Mone..." | The legend goes under the ring unless there is room, and wraps | `4f9bc03` |
 | "statement september 1 to 19" was made for September so far | Statements take days | `4f9bc03` |
-| Maya Credit with Bill closes and Payment due both the 6th | Settings says what that means: due the 6th of the month after the bill | `4f9bc03` |
+| Maya Credit with Bill closes and Payment due both the 6th | Settings says what that means: due the 6th of the month after the bill (since 17 November: due the day the bill closes, see that entry) | `4f9bc03` |
 | Phone at 320 to 430px: filters cut to "All ...", Settings sections hidden past the edge, account names cut, Insights picks and tabs past the edge, months hidden, a stray dot in Activity | Every screen re-checked at 320, 360, 390 and 430, light and dark: nothing past an edge | `c722623` |
 | "Gas 300" typed today was "already in your ledger" because of yesterday's | Typed entries match the same day only | `c722623` |
 
@@ -3617,6 +3617,42 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
   lasting fact is said, kept as notes in Settings, AI, that can be edited or
   removed, and sent with every question. Waiting on the owner.
 
+### 2026-11-17: a credit line's month, checked against the lender's statement
+
+The owner: "Everything credit or loan in the span of example November it
+will be paid in billing date ... i credit 1000 today then paid then credited
+again then paid agin ... not just in maya", then sent Maya's statement
+(coverage 7 October to 6 November, statement 7 November, payment due 21
+November, the borrowing, its service fee and stamp tax on the day borrowed,
+the repayment, total due PHP 0.00) and the Maya app (used, available,
+outstanding with fees, latest bill PHP 0.00 due 21 November).
+
+- **The bill math already matched.** Replayed day by day on the 16 November
+  backup with Maya's own terms, the app gives Maya's figures to the centavo:
+  the bill that closed 6 November holds PHP 0.00, what is owed now is due
+  21 December, and the limit used and available are Maya's. The owner
+  records each fee as a charge on the day borrowed, which is how Maya adds
+  it.
+- **What did not match was two settings, not the math.** Maya Credit is
+  saved as due "the 6th" (Maya says 15 days after the bill closes), and its
+  limit counts fees (Maya counts only what was borrowed). Both are in
+  section 6 for the owner.
+- **Due the day the bill closes** (`debt.ts` `dueAfterBill`). A due day on
+  the closing day was read as a month after it: a borrowing on 16 November
+  showed due 6 January, 50 days on, when Maya wants it on 21 December. It
+  now reads as the owner says it, due on the billing date (6 December),
+  which can only be early, never late. A line with a closing day and no due
+  date set reads the same way; before, its bill was due on the closing day
+  until it closed and a month later after.
+- **An unpaid bill stays first.** With a long time to pay (45 days after the
+  bill closes), a bill not yet due was folded into the next one when that
+  closed, and its date moved a month on. The oldest unpaid bill, up to three
+  back, is now the next payment whether or not its day has come.
+- `billingCycle.test.ts` walks a statement month for any lender: borrow, fee,
+  pay, borrow twice, pay, borrow again; a bill paid to zero; a part payment
+  after it closes; a new borrowing on the next bill; late; due on the
+  closing day, on a day of the month, and 45 days after. Invented figures.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -3669,6 +3705,15 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
    the plan and #3976 in Firestore. #3974 stays as a plain transfer. To keep
    a plan for it, make one To save or move, into Maya Bank (Personal
    savings), and link #3974 from its sheet.
+
+10. **Maya Credit, two settings (17 November, from Maya's own statement).**
+    Debt, Maya Credit, Details: Payment due, pick "15 days after the bill
+    closes" (Maya: coverage ends on the 6th, payment due on the 21st), and
+    What counts against it, pick "Only what was borrowed" (Maya counts the
+    borrowing, not its fees, against the limit). Until then the app says each bill is due
+    on the 6th it closes (early, never late) and shows less credit left than
+    Maya does. The chat sets the first: "Maya Credit is due 15 days after
+    the bill closes".
 
 ---
 

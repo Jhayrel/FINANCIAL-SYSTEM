@@ -1077,23 +1077,35 @@ export function dueIfBorrowedOn(debt: Debt, date: IsoDate): IsoDate | null {
   if (billing === undefined || billing < 1 || billing > 31) return null;
   const thisBill = onDay(getYear(date), getMonth(date), billing);
   const bill = thisBill >= date ? thisBill : monthAfter(date, billing);
-  return hasDueRule(debt) ? dueAfterBill(debt, bill) : monthAfter(bill, billing);
-}
-
-/** A due rule is set: days after the bill closes, or a day of the month. */
-function hasDueRule(debt: Debt): boolean {
-  return (debt.dueAfterDays !== undefined && debt.dueAfterDays >= 1 && debt.dueAfterDays <= 60) || (debt.dueDay !== undefined && debt.dueDay >= 1 && debt.dueDay <= 31);
+  return dueAfterBill(debt, bill);
 }
 
 /**
- * When a bill that closes on `bill` must be paid: so many days after it, or
- * the first due day after it. For any lender, as its own terms say.
+ * When a bill that closes on `bill` must be paid, for any lender, as its own
+ * terms say: so many days after it closes, or the first due day after it.
+ * With no due date of its own, or a due day that is the closing day, it is
+ * due the day it closes.
+ *
+ * Everything borrowed, charged and paid between one closing and the next
+ * adds up to one bill on the closing day (owner, 17 November 2026:
+ * "Everything credit or loan in the span of ... November it will be paid in
+ * billing date"). The owner's Maya statement reads the same way: coverage 7
+ * October to 6 November, the borrowing, its fees and the repayment inside
+ * it, a total due of what was left, payable 15 days after it closed.
+ *
+ * Two readings this replaced, both of which moved the same money a month on:
+ *   - No due date set: due on the closing day before the bill closed, and
+ *     a month later once it had.
+ *   - The due day on the closing day (Maya Credit set to the 6th for both):
+ *     due on the 6th of the month after, 50 days from a borrowing whose
+ *     lender wanted it in 35. Read as the owner says it, due on the billing
+ *     date, it can only be early, never late.
  */
 export function dueAfterBill(debt: Debt, bill: IsoDate): IsoDate {
   const after = debt.dueAfterDays;
   if (after !== undefined && after >= 1 && after <= 60) return addDays(bill, after);
   const day = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
-  return day !== undefined ? nextOnDay(bill, day) : monthAfter(bill, debt.billingDay ?? getDay(bill));
+  return day !== undefined && day !== debt.billingDay ? nextOnDay(bill, day) : bill;
 }
 
 /**
@@ -1166,8 +1178,9 @@ export function debtDue(
 
   /*
    * A billing day: the bill is what was owed when it closed, less what has
-   * been paid since, due on the due day after it. Borrowed after it, it goes
-   * on the next bill. With no due day, it is due by the next billing day.
+   * been paid since, due when `dueAfterBill` says. Borrowed after it, it
+   * goes on the next bill. Before a bill closes, what is owed is due when
+   * that bill will be.
    */
   const billing = debt.billingDay;
   if (billing !== undefined && billing >= 1 && billing <= 31) {
@@ -1182,20 +1195,22 @@ export function debtDue(
     }
     const billed = Math.max(0, owedAtBill - paidAfter);
     const bill = { last: lastBill, billed, next: nextBill };
-    const ruled = hasDueRule(debt);
     /*
      * The bill before stays due until it is paid: on its due day it is due
      * today, and late after. With the due day on the billing day, the new
      * bill took it in and the date moved a month on, so an unpaid bill was
      * never due or late (19 October 2026 audit).
      */
-    // The oldest bill still unpaid, up to three back, so a late one stays late.
+    /*
+     * The oldest bill still unpaid, up to three back, so a late one stays
+     * late. One not due yet counts too: with a long time to pay (45 days
+     * after it closes) it is still open when the next bill closes, and
+     * folding it into that bill moved its date a month on.
+     */
     for (let back = 3; back >= 1; back -= 1) {
       const closed = addMonths(lastBill, -back);
       const prevBill = onDay(getYear(closed), getMonth(closed), billing);
-      const after = addMonths(lastBill, 1 - back);
-      const prevDue = ruled ? dueAfterBill(debt, prevBill) : onDay(getYear(after), getMonth(after), billing);
-      if (prevDue > asOf) continue;
+      const prevDue = dueAfterBill(debt, prevBill);
       let owedPrev = 0;
       let paidPrev = 0;
       for (const t of rows) {
@@ -1205,9 +1220,9 @@ export function debtDue(
       const unpaidPrev = Math.max(0, owedPrev - paidPrev);
       if (unpaidPrev > 0) return { ...withDate(prevDue, "billing", unpaidPrev), bill: { last: prevBill, billed: unpaidPrev, next: lastBill } };
     }
-    if (billed > 0 && ruled) return { ...withDate(dueAfterBill(debt, lastBill), "billing", billed), bill };
-    if (billed > 0) return { ...withDate(nextBill, "billing", position.outstanding), bill };
-    return { ...withDate(ruled ? dueAfterBill(debt, nextBill) : nextBill, "billing", position.outstanding), bill };
+    // The bill that closed and is not paid yet; otherwise what is owed now, on the bill still to close.
+    if (billed > 0) return { ...withDate(dueAfterBill(debt, lastBill), "billing", billed), bill };
+    return { ...withDate(dueAfterBill(debt, nextBill), "billing", position.outstanding), bill };
   }
 
   const day = debt.dueDay ?? (debt.dueDate ? getDay(debt.dueDate) : undefined);

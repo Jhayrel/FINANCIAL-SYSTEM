@@ -801,16 +801,17 @@ function DebtCard({
         )}
 
         {/*
-          The bill closing and falling due on the same day reads as due a
-          month after each bill. Maya Credit's terms are "due 15 days after
-          your billing cutoff date", and the card said due January 6 for a
-          December 21 payment (owner, 17 November 2026: "Why the due in debt
-          still say 50 days?"). Said where the date is, one press from Details.
+          The bill closing and falling due on the same day reads as due the
+          day each bill closes. Maya Credit's terms are "due 15 days after
+          your billing cutoff date", and the card once said due January 6 for
+          a December 21 payment (owner, 17 November 2026: "Why the due in
+          debt still say 50 days?"). Said where the date is, one press from
+          Details, so the lender's real date can be set.
         */}
         {!settled && !through && !editing && debt.billingDay && debt.dueDay === debt.billingDay && !debt.dueAfterDays && due.nextDue && (
           <div className="fms-settle">
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-              {`The bill closes and the payment is due on the same day, the ${ordinalDay(debt.billingDay)}, so each bill is shown as due a month after it closes: ${formatMedium(due.nextDue)}. If the lender's terms say the payment is due a number of days after the bill closes, set that under Payment due.`}
+              {`The bill closes and the payment is due on the same day, the ${ordinalDay(debt.billingDay)}, so each bill is shown as due the day it closes: ${formatMedium(due.nextDue)}. If the lender's statement gives a later due date, such as 15 days after the bill closes, set that under Payment due.`}
             </p>
             <Button size="sm" onClick={onEdit}>
               Set the due date

@@ -139,10 +139,10 @@ describe("a credit line, supposed: what is paid back, when, and from which month
   });
   it("adds the charge at the last draw's rate and says which month pays it", () => {
     const words = creditWhatIfWords(creditWhatIf(readCreditWhatIf(q, [line], ASOF)!, history, ASOF));
-    expect(words.split("\n")[0]).toBe("**If ₱4,000.00 goes on Card Credit on November 20, 2026, you pay back about ₱4,240.00, due January 6, 2027: January 2027's money pays it.**");
+    expect(words.split("\n")[0]).toBe("**If ₱4,000.00 goes on Card Credit on November 20, 2026, you pay back about ₱4,240.00, due December 6, 2026: December 2026's money pays it.**");
     expect(words).toContain("- Its limit is ₱10,000.00, so ₱5,760.00 of it stays free after this.");
     expect(words).toContain("- The charge: your last draw, ₱2,500.00 on October 1, 2026, was charged ₱150.00 (6.00%), so ₱4,000.00 would be charged about ₱240.00. The lender sets the real figure.");
-    expect(words).toContain("the ₱4,000.00 is November 2026's spending, on November 20, 2026, and the ₱240.00 charge is spending the day it is added. Paying it back in January 2027 moves money to the lender; it is not spending again.");
+    expect(words).toContain("the ₱4,000.00 is November 2026's spending, on November 20, 2026, and the ₱240.00 charge is spending the day it is added. Paying it back in December 2026 moves money to the lender; it is not spending again.");
     expect(words).not.toContain(DASH);
   });
 });

@@ -16,10 +16,19 @@ describe("money until the next income", () => {
     expect(readBridgeAsk("I received my salary today 10000", "2026-10-19")).toBeNull();
     expect(readBridgeAsk("how much can I spend today?", "2026-10-19")).toBeNull();
   });
-  it("knows a borrowing before the bill closes is due a month after it", () => {
+  it("knows a borrowing goes on the bill that closes next, and when that bill is due", () => {
+    // The same day for both: due the day the bill closes (owner, 17 November 2026).
     const line = { id: "c", name: "Card", counterparty: "Bank", kind: "payable", form: "credit-line", billingDay: 6, dueDay: 6 } as unknown as Debt;
-    expect(dueIfBorrowedOn(line, "2026-10-19")).toBe("2026-12-06");
-    expect(dueIfBorrowedOn(line, "2026-11-06")).toBe("2026-12-06");
-    expect(dueIfBorrowedOn(line, "2026-11-07")).toBe("2027-01-06");
+    expect(dueIfBorrowedOn(line, "2026-10-19")).toBe("2026-11-06");
+    expect(dueIfBorrowedOn(line, "2026-11-06")).toBe("2026-11-06");
+    expect(dueIfBorrowedOn(line, "2026-11-07")).toBe("2026-12-06");
+    // Due 15 days after the bill closes.
+    const after = { ...line, dueDay: undefined, dueAfterDays: 15 } as unknown as Debt;
+    expect(dueIfBorrowedOn(after, "2026-10-19")).toBe("2026-11-21");
+    expect(dueIfBorrowedOn(after, "2026-11-06")).toBe("2026-11-21");
+    expect(dueIfBorrowedOn(after, "2026-11-07")).toBe("2026-12-21");
+    // Another day of the month: the first one after the bill closes.
+    const day = { ...line, dueDay: 25 } as unknown as Debt;
+    expect(dueIfBorrowedOn(day, "2026-11-07")).toBe("2026-12-25");
   });
 });

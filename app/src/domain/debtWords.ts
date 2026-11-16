@@ -176,10 +176,12 @@ export const BILL_DAYS_EXPLAINED =
  *
  * The owner, 28 September 2026, with Maya Credit set to the 6th for both:
  * "are you sure about this 2x". It is read one way: what is borrowed before
- * a bill closes on the 6th goes on that bill, and the bill is due on the 6th
- * of the month after it, a month to pay. Whether that is the lender's rule
- * only its own app can say, so the note says what the app will do and where
- * to check.
+ * a bill closes on the 6th goes on that bill, and the bill is due that day,
+ * the billing date (owner, 17 November 2026: "it will be paid in billing
+ * date"). It was read as due on the 6th of the month after, which put a
+ * payment Maya wanted on 21 December on 6 January. Whether the lender
+ * gives longer only its statement can say, so the note says what the app
+ * will do and where to check.
  */
 export function sameDayNote(name: string, billingDay: number | undefined, dueDay: number | undefined, dueAfterDays?: number): string {
   if (billingDay && dueAfterDays) {
@@ -189,7 +191,7 @@ export function sameDayNote(name: string, billingDay: number | undefined, dueDay
   }
   if (!billingDay || billingDay !== dueDay) return "";
   const day = ordinalDay(billingDay);
-  return `${name}: both are the ${day}. What you borrow before a bill closes on the ${day} is due on the ${day} of the month after, so the app expects a month to pay each bill. Check the due date in the lender's terms: if it says a number of days after the billing or cutoff date, pick that under Payment due (for example, "15 days after the bill closes"); if it is another day of the month, pick that day; if the ${day} is the due date and there is no separate billing date, set Bill closes to Not set.`;
+  return `${name}: both are the ${day}, so each bill is due the day it closes. What you borrow up to the ${day} is due on the ${day}. Check the due date on the lender's statement: if it is a number of days after the bill closes, pick that under Payment due (for example, "15 days after the bill closes"); if it is another day of the month, pick that day.`;
 }
 
 /** A day of the month as a bill says it: 1st, 2nd, 6th, 21st. */
