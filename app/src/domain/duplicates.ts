@@ -349,11 +349,11 @@ function oneFigureApart(draft: Draft, row: Transaction): Duplicate | null {
     row,
     certainty: "close",
     evidence: [
-      `${formatMoney(amount)} here, ${formatMoney(row.amount)} there: one digit apart, as a figure half hidden or misread on a picture is.`,
+      `${formatMoney(amount)} here and ${formatMoney(row.amount)} there differ by one digit, which often happens when a figure is partly hidden or misread.`,
       apart === 0 ? `Both dated ${formatMedium(row.date)}.` : `A day apart: this one ${formatMedium(draft.date)}, that one ${formatMedium(row.date)}.`,
       ...(agree(draft.item, row.item) ? [`Both ${row.item}.`] : []),
       ...(named ? [`Both ${named}.`] : []),
-      `If it is the same payment, discard this card: ${formatMoney(row.amount)} is already saved.`,
+      `If this is the same payment, discard this card. ${formatMoney(row.amount)} is already recorded.`,
     ],
     score: apart === 0 ? 4 : 3,
   };

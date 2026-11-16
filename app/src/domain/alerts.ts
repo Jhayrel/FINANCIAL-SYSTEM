@@ -1246,7 +1246,7 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         detail: isSave(p)
           ? `${money(v.left)} not moved into ${p.into} yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Move it, move the date, or skip it in the Planner.`
           : smallRest(p, v.paid, v.left)
-            ? `${money(v.paid)} paid of ${money(p.amount)}, ${money(v.left)} left, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. If it cost less, open it in the Planner and press "It cost less: mark it paid"; if not, pay the rest, move the date, or skip it.`
+            ? `${money(v.paid)} of ${money(p.amount)} paid, ${money(v.left)} remaining, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} overdue. If the final cost was lower, open it in the Planner and mark it as paid in full. Otherwise, pay the remaining amount, change the date, or skip it.`
             : `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Pay it, move the date, or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
         weight: 92,
       });

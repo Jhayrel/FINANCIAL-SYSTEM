@@ -295,7 +295,7 @@ export function goalInterest(
  */
 export function destinationWords(to: Account | undefined): string {
   if (!to) return "";
-  if (to.kind === "goal") return `In ${to.name} it is saved for that goal, out of safe to spend.`;
-  if (to.kind === "savings" || to.kind === "reserve") return `In ${to.name} it stays savings: not counted in safe to spend until you move it to a wallet.`;
-  return `In ${to.name} it is ordinary money: counted in safe to spend from today, with the rest of what the wallets hold.`;
+  if (to.kind === "goal") return `In ${to.name}, it is saved for that goal and does not count toward safe to spend.`;
+  if (to.kind === "savings" || to.kind === "reserve") return `In ${to.name}, it stays in savings and does not count toward safe to spend until you move it to a wallet.`;
+  return `In ${to.name}, it becomes regular spending money and counts toward safe to spend from today.`;
 }

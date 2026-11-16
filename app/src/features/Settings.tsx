@@ -1692,13 +1692,13 @@ function GoalRow({
     if (bankShows === null) return;
     const read = goalInterest(goal, transactions, { actual: bankShows, today: today(), nextRecordNumber: nextRecord });
     if (read.rows.length === 0) {
-      setBlocked(`The bank shows what the app has, ${formatMoney(read.recorded)}: no interest to add.`);
+      setBlocked(`The bank balance matches the app (${formatMoney(read.recorded)}). There is no interest to add.`);
       setInterestOpen(false);
       return;
     }
     const ok = await confirm({
       title: read.adjustment > 0 ? `Add ${formatMoney(read.adjustment)} of interest to ${goal.name}?` : `Record a ${formatMoney(-read.adjustment)} bank charge on ${goal.name}?`,
-      body: `The app has ${formatMoney(read.recorded)} in it and the bank shows ${formatMoney(bankShows)}. ${read.adjustment > 0 ? "The difference is income the bank paid, saved in the goal." : "The difference is a charge the bank took, recorded as spending."} The goal stays open; nothing else moves.`,
+      body: `The app shows ${formatMoney(read.recorded)} and the bank shows ${formatMoney(bankShows)}. ${read.adjustment > 0 ? "The difference is interest earned, and it is added to the goal." : "The difference is a bank charge, and it is recorded as spending."} The goal stays open, and nothing else changes.`,
       confirmLabel: read.adjustment > 0 ? "Add the interest" : "Record the charge",
     });
     if (!ok) return;
@@ -1756,8 +1756,8 @@ function GoalRow({
       {p.status === "matured" && (
         <div style={{ marginTop: "var(--space-2)" }}>
           <Alert status="warn" title="Deadline passed">
-            Saved <Money value={p.saved} size="s" /> of <Money value={p.target} size="s" />. Spend it, close the goal
-            and say where the money goes, or extend the deadline. The app will not move your money for you.
+            Saved <Money value={p.saved} size="s" /> of <Money value={p.target} size="s" />. Use it, close the goal
+            and choose where the money goes, or extend the deadline. The app never moves money on its own.
           </Alert>
         </div>
       )}
@@ -1765,15 +1765,15 @@ function GoalRow({
       {p.status === "reached" && (
         <div style={{ marginTop: "var(--space-2)" }}>
           <Alert status="ok" title="Target reached">
-            <Money value={p.saved} size="s" /> saved. Record the purchase as a Spending row from this goal,
-            or close the goal and move the money to the wallet you will pay from.
+            <Money value={p.saved} size="s" /> saved. Record the purchase from this goal, or close the goal
+            and move the money to the wallet you will pay from.
           </Alert>
         </div>
       )}
 
       {closing && !reconciling && (
         <div className="fms-goalmove" style={{ marginTop: "var(--space-3)", display: "grid", gap: "var(--space-2)" }}>
-          <Field label={`Where its ${formatMoney(p.saved)} goes`} help={destinationWords(closeAccount)}>
+          <Field label={`Move its ${formatMoney(p.saved)} to`} help={destinationWords(closeAccount)}>
             <Select
               value={closeAccount?.name ?? ""}
               options={[...(parent ? [parent.name] : []), ...targets.filter((a) => a.id !== parent?.id && a.kind !== "goal").map((a) => a.name)]}
@@ -1781,7 +1781,7 @@ function GoalRow({
             />
           </Field>
           <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-            Done or cancelled, closing moves what it holds there as one transfer, and the goal is archived. Bought the thing already? Record the purchase from this goal first, then close it.
+            Whether the goal is complete or cancelled, closing it moves the balance there in one transfer and archives the goal. If you have already made the purchase, record it from this goal first, then close it.
           </p>
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
             <Button size="sm" variant="primary" disabled={!closeAccount} onClick={() => void finish()}>
@@ -1796,7 +1796,7 @@ function GoalRow({
 
       {interestOpen && (
         <div className="fms-goalmove" style={{ marginTop: "var(--space-3)", display: "grid", gap: "var(--space-2)" }}>
-          <Field label="What the bank shows in it now" help={`The app has ${formatMoney(p.saved)}. More than that is interest; less is a charge.`}>
+          <Field label="Current balance shown by the bank" help={`The app shows ${formatMoney(p.saved)}. Any amount above this is recorded as interest, and any amount below as a bank charge.`}>
             <AmountInput value={bankShows} onChange={setBankShows} />
           </Field>
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>

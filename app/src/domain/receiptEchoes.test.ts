@@ -48,7 +48,7 @@ describe("a row printed with a minus is read by its size", () => {
     expect(read.refused).toHaveLength(3);
     const said = refusalWords(read.refused);
     expect(said).toHaveLength(1);
-    expect(said[0]).toMatch(/^3 rows, each for the same reason: A debt movement with no amount/);
+    expect(said[0]).toMatch(/^A debt movement with no amount in it could not be read \(3 rows\)\.$/);
     expect(refusalWords([{ sourceRef: "a", reason: "One." }, { sourceRef: "b", reason: "Two." }])).toEqual(["One.", "Two."]);
   });
 });
@@ -70,8 +70,8 @@ describe("the peso sign read as a digit", () => {
     const { kept, echoes } = withoutSignEchoes([card(77_500, "Food", "Diner 0042"), card(577_500, "", "Paid via wallet")], readings);
     expect(kept.map((p) => p.draft.amount)).toEqual([77_500]);
     expect(echoes).toHaveLength(1);
-    expect(echoes[0]!.reason).toContain("peso sign taken for a 5");
-    expect(echoes[0]!.reason).toContain("If it was a second payment, type it.");
+    expect(echoes[0]!.reason).toContain("peso sign mistaken for a 5");
+    expect(echoes[0]!.reason).toContain("If this was a separate payment, add it yourself.");
   });
   it("and kept whenever the paper does not settle it", () => {
     // Both shown: two real payments.
@@ -113,7 +113,7 @@ describe("a figure one digit off a payment already saved", () => {
     expect(found).toHaveLength(1);
     expect(found[0]!.row.recordNumber).toBe(900);
     expect(found[0]!.certainty).toBe("close");
-    expect(found[0]!.evidence[0]).toBe("₱3,705.40 here, ₱3,105.40 there: one digit apart, as a figure half hidden or misread on a picture is.");
+    expect(found[0]!.evidence[0]).toBe("₱3,705.40 here and ₱3,105.40 there differ by one digit, which often happens when a figure is partly hidden or misread.");
   });
   it("never when typed, round, two digits apart, through another account, or days away", () => {
     expect(duplicatesOf(card, [saved], { typed: true })).toEqual([]);

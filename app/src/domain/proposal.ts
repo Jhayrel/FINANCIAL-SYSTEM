@@ -164,7 +164,7 @@ function debtAmount(value: Record<string, unknown>): ReturnType<typeof parseAmou
 export function refusalWords(refused: readonly Refused[]): string[] {
   const counts = new Map<string, number>();
   for (const r of refused) counts.set(r.reason, (counts.get(r.reason) ?? 0) + 1);
-  return [...counts].map(([reason, n]) => (n === 1 ? reason : `${n} rows, each for the same reason: ${reason}`));
+  return [...counts].map(([reason, n]) => (n === 1 ? reason : `${reason.replace(/\.$/, "")} (${n} rows).`));
 }
 
 
@@ -1399,7 +1399,7 @@ export function withoutSignEchoes(
     if (!twin || twin.draft.amount === null) return true;
     echoes.push({
       sourceRef: p.sourceRef,
-      reason: `${pesos(long)} is the ${pesos(twin.draft.amount)} card read again, with the peso sign taken for a ${digits.charAt(0)}: the picture shows ${pesos(twin.draft.amount)} and no ${pesos(long)}, so it was left out. If it was a second payment, type it.`,
+      reason: `${pesos(long)} was left out. It appears to be the ${pesos(twin.draft.amount)} payment read a second time, with the peso sign mistaken for a ${digits.charAt(0)}: the picture shows ${pesos(twin.draft.amount)} but not ${pesos(long)}. If this was a separate payment, add it yourself.`,
     });
     return false;
   });

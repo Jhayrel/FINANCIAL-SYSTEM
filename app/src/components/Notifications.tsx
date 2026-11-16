@@ -48,15 +48,15 @@ const GLYPH: Record<AlertLevel, IconName> = { over: "statusOver", warn: "statusW
 
 /** What tapping a finding does, said on the finding. */
 const GO: Record<AlertArea, string> = {
-  budget: "Open Budget",
-  wallet: "Show its rows",
+  budget: "View in Budget",
+  wallet: "View the entries",
   bills: "Record it on Add",
-  debt: "Open Debt",
-  goals: "Open Settings",
-  settings: "Open Settings",
-  pattern: "Open Insights",
+  debt: "View in Debt",
+  goals: "View in Settings",
+  settings: "View in Settings",
+  pattern: "View in Insights",
   review: "Review in the Database",
-  planner: "Open the Planner",
+  planner: "View in the Planner",
 };
 
 function readSeen(): ReadonlySet<string> {
@@ -178,7 +178,7 @@ export function Notifications({
           unseen.length > 0 ? `, ${unseen.length} new` : ""
         }`;
   const goWords = (a: Finding): string =>
-    a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "Open Settings, Categories" : a.id.startsWith("debt-below-zero") ? "Open the Dashboard" : a.query ? "Show the rows" : GO[a.area];
+    a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "View in Settings, Categories" : a.id.startsWith("debt-below-zero") ? "View on the Dashboard" : a.query ? "View the entries" : GO[a.area];
 
   return (
     <div className="fms-notify" ref={box}>
@@ -232,7 +232,7 @@ export function Notifications({
           {shown.length === 0 ? (
             <p className="t-caption fms-notify-empty">
               {away.length > 0
-                ? "Nothing new. What you hid comes back here when its figures change."
+                ? "Nothing new. Hidden items return here when their figures change."
                 : "Nothing right now. Bills, budgets, balances and debts are checked every time the ledger changes, and anything worth a look shows here."}
             </p>
           ) : (
@@ -275,7 +275,7 @@ export function Notifications({
                         onOpen(a);
                       }}
                     >
-                      {goWords(a)}, and see where
+                      {goWords(a)}
                     </button>
                     <button type="button" className="t-caption fms-notify-hide" onClick={() => hide(a)} aria-label={`Hide "${a.title}" until it changes`}>
                       Hide
@@ -289,7 +289,7 @@ export function Notifications({
           {away.length > 0 && (
             <div className="fms-notify-away">
               <button type="button" className="t-micro fms-notify-awaytoggle" aria-expanded={showAway} onClick={() => setShowAway((v) => !v)}>
-                {showAway ? "Close the hidden ones" : `${away.length} hidden until ${away.length === 1 ? "it changes" : "they change"}: show`}
+                {showAway ? "Hide this list" : `Show ${away.length} hidden ${away.length === 1 ? "item" : "items"}. ${away.length === 1 ? "It returns" : "They return"} when the figures change.`}
               </button>
               {showAway && (
                 <ul className="fms-notify-list">

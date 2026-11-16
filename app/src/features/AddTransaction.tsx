@@ -2761,12 +2761,12 @@ export function AddTransaction({
                 {planShort > 0 && (
                   <>
                     <span className="fms-planform-switchtext">
-                      <span className="t-body">That is all it cost</span>
+                      <span className="t-body">Paid in full</span>
                       <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                        {settles ? `On: nothing more to pay. The plan closes as paid, ${formatMoney(planShort)} under what was planned.` : `Off: ${formatMoney(planShort)} is still to pay, and the plan stays open for it.`}
+                        {settles ? `On: this payment completes the plan. It closes as paid, ${formatMoney(planShort)} below the planned amount.` : `Off: ${formatMoney(planShort)} remains to be paid, and the plan stays open.`}
                       </span>
                     </span>
-                    <Switch checked={settles} onChange={(on) => setSettleChoice({ planId: planMatch.plan.id, on })} label="That is all it cost: mark the plan paid" />
+                    <Switch checked={settles} onChange={(on) => setSettleChoice({ planId: planMatch.plan.id, on })} label="Paid in full: close the plan as paid" />
                   </>
                 )}
                 {/* What the plan already knows, one tap away when the form has it blank. */}

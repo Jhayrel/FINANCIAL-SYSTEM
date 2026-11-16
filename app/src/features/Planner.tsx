@@ -712,7 +712,7 @@ function PlanSheet(props: {
   const primary =
     open ? (
       <Button variant="primary" onClick={props.onPay}>
-        {isSave(p) || misfiled?.into ? (v.paid > 0 ? "Move the rest" : "Record the move") : v.paid > 0 ? "Pay the rest" : "Record payment"}
+        {isSave(p) || misfiled?.into ? (v.paid > 0 ? `Move the remaining ${formatMoney(v.left)}` : "Record the transfer") : v.paid > 0 ? `Pay the remaining ${formatMoney(v.left)}` : "Record payment"}
       </Button>
     ) : v.state === "removed" ? (
       <Button variant="primary" onClick={props.onReopen}>
@@ -734,9 +734,9 @@ function PlanSheet(props: {
   const likelyLess = costLess && smallRest(p, v.paid, v.left);
   const settle = (): void => {
     void confirm({
-      title: `Mark "${p.title}" paid in full?`,
-      body: `It cost ${formatMoney(v.paid)}, ${formatMoney(v.left)} less than the ${formatMoney(p.amount)} planned. The plan goes under Done as paid${p.setAside && v.counts ? `, and the ${formatMoney(v.left)} stops being set aside in safe to spend` : ""}. No money moves. "Open it again" on the plan puts it back.`,
-      confirmLabel: "Mark it paid",
+      title: `Mark "${p.title}" as paid in full?`,
+      body: `The final cost was ${formatMoney(v.paid)}, ${formatMoney(v.left)} less than the ${formatMoney(p.amount)} planned. The plan moves to Done as paid${p.setAside && v.counts ? `, and ${formatMoney(v.left)} is no longer set aside in safe to spend` : ""}. No money moves. You can reopen it from Done.`,
+      confirmLabel: "Mark as paid",
     }).then((ok) => {
       if (ok) props.onSettle();
     });
@@ -753,7 +753,7 @@ function PlanSheet(props: {
   const rows: SheetAction[] = open
     ? [
         // Not twice: with a small rest it is the button at the top of the sheet.
-        ...(costLess && !likelyLess ? [{ label: "It cost less: mark it paid", icon: "check" as const, run: settle }] : []),
+        ...(costLess && !likelyLess ? [{ label: "Mark as paid in full", icon: "check" as const, run: settle }] : []),
         { label: "Edit", icon: "edit", run: props.onEdit },
         { label: "Move the date", icon: "planner", run: props.onMove },
         { label: "Link a payment I added", icon: "ledger", run: props.onLink },
@@ -822,11 +822,11 @@ function PlanSheet(props: {
             title={`${formatMoney(v.paid)} paid of ${formatMoney(p.amount)}`}
             action={
               <Button size="sm" variant="primary" onClick={settle}>
-                It cost less: mark it paid
+                Mark as paid in full
               </Button>
             }
           >
-            {`${formatMoney(v.left)} is left. If that is all it cost, mark it paid: the plan closes${p.setAside && v.counts ? ` and stops setting ${formatMoney(v.left)} aside` : ""}. If not, pay the rest below.`}
+            {`${formatMoney(v.left)} remains. If the final cost was lower than planned, mark it as paid in full: the plan closes${p.setAside && v.counts ? ` and ${formatMoney(v.left)} is no longer set aside` : ""}. Otherwise, pay the remaining amount below.`}
           </Alert>
         )}
         {/* Not while an entry looks like its payment already: the money may have gone, not be short. */}
@@ -1944,8 +1944,8 @@ function LinkSheet(props: {
 function closeEffect(v: PlanView): string {
   const p = v.plan;
   if (v.left <= 0) return "Nothing is left to pay on it, so safe to spend does not change.";
-  if (v.counts) return `Safe to spend is holding ${formatMoney(v.left)} back for it now. That money is free again the moment it is closed, so safe to spend on the Dashboard goes up by ${formatMoney(v.left)}.`;
-  if (p.goalId) return "Its money is saved in a goal, apart from safe to spend, so the Dashboard does not change.";
+  if (v.counts) return `Safe to spend currently sets aside ${formatMoney(v.left)} for this plan. Closing it releases that amount, so safe to spend on the Dashboard rises by ${formatMoney(v.left)}.`;
+  if (p.goalId) return "Its money is saved in a goal, separate from safe to spend, so the Dashboard does not change.";
   if (!p.setAside) return "It is not counted in safe to spend (that switch is off on the plan), so the Dashboard's figures do not change.";
   if (p.due === NO_DATE) return "It has no date yet, so nothing is held back for it and the Dashboard's figures do not change.";
   return "It is due after this month, so nothing is held back for it yet and the Dashboard's figures do not change today.";

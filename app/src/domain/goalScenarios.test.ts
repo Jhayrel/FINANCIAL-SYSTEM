@@ -45,14 +45,14 @@ describe("finished or cancelled: the money goes where it is said to", () => {
     const after = [...ledger, ...plan.rows];
     expect(walletBalance(after, goal.name)).toBe(0);
     expect(walletBalance(after, wallet.name)).toBe(-300_000 + 600_000);
-    expect(destinationWords(wallet)).toMatch(/counted in safe to spend/);
+    expect(destinationWords(wallet)).toMatch(/counts toward safe to spend from today/);
   });
   it("to cash, or back to the bank it sits in, with interest first when the bank shows more", () => {
     expect(planGoalClose(goal, accounts, ledger, { today: TODAY, nextRecordNumber: 10, to: cash }).rows[0]).toMatchObject({ toWallet: "Cash", amount: 600_000 });
     const home = planGoalClose(goal, accounts, ledger, { today: TODAY, nextRecordNumber: 10, reconcile: { actual: 600_900 } });
     expect(home.rows.map((r) => [r.type, r.amount])).toEqual([["Revenue", 900], ["Transfer", 600_900]]);
     expect(home.rows[1]!.toWallet).toBe(bank.name);
-    expect(destinationWords(bank)).toMatch(/stays savings/);
+    expect(destinationWords(bank)).toMatch(/stays in savings/);
   });
 });
 

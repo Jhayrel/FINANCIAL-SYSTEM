@@ -707,7 +707,7 @@ export function checkDraft(
       field: "fromWallet",
       message:
         left && left.after >= 0
-          ? `${draft.fromWallet} is a goal. Spending ${money((draft.amount ?? 0) + draft.fee)} from it leaves ${money(left.after)} saved toward it. If you are giving the goal up, close it in Settings, Accounts, and say where the rest goes.`
+          ? `${draft.fromWallet} is a goal. Spending ${money((draft.amount ?? 0) + draft.fee)} from it leaves ${money(left.after)} saved toward it. If you are cancelling the goal, close it in Settings, Accounts, and choose where the rest goes.`
           : `${draft.fromWallet} is ${is}. Taking ${money((draft.amount ?? 0) + draft.fee)} out of it?`,
     });
   }

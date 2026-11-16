@@ -5879,11 +5879,11 @@ export function AskPanel({
             if (asking && asking.cards.some((c) => ids.has(c.cardId))) setAsking(null);
             if (pending && pending.draft.amount === disputed) setPending(null);
             const flagged = open.some((t) => t.proposal.adjustments.some((a) => /not printed on the picture/i.test(a)));
-            const words = `Discarded the ${formatMoney(disputed)} card${open.length > 1 ? "s" : ""}: nothing from ${open.length > 1 ? "them" : "it"} was saved.${flagged ? " The picture as read on this device does not show it either." : ""}${turns.some((t) => isOffer(t) && t.state === "open" && !open.includes(t)) ? " The other cards stay for you to check." : ""}`;
+            const words = `Discarded the ${formatMoney(disputed)} card${open.length > 1 ? "s" : ""}. Nothing was saved from ${open.length > 1 ? "them" : "it"}.${flagged ? " The picture, as read on this device, does not show this amount either." : ""}${turns.some((t) => isOffer(t) && t.state === "open" && !open.includes(t)) ? " The other cards are still open for you to review." : ""}`;
             say({ kind: "assistant", text: words, from: "this device" });
             log(aiEvent("answered", "add", { text: words, model: "this device" }));
           } else {
-            const words = `The ${formatMoney(disputed)} card is already discarded: nothing from it was saved.`;
+            const words = `The ${formatMoney(disputed)} card was already discarded. Nothing was saved from it.`;
             say({ kind: "assistant", text: words, from: "this device" });
             log(aiEvent("answered", "add", { text: words, model: "this device" }));
           }
@@ -5899,9 +5899,9 @@ export function AskPanel({
         emptyBox();
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
-        say({ kind: "assistant", ephemeral: true, text: "The card you discarded, as it was. Check it, then add it.", from: "this device" });
+        say({ kind: "assistant", ephemeral: true, text: "Here is the card you discarded, unchanged. Review it, then add it.", from: "this device" });
         await offer(
-          { ...wanted.proposal, draft: cardOf(wanted), adjustments: [...wanted.proposal.adjustments.filter((a) => !/^Brought back/.test(a)), "Brought back from the card discarded earlier."] },
+          { ...wanted.proposal, draft: cardOf(wanted), adjustments: [...wanted.proposal.adjustments.filter((a) => !/^Restored from a card discarded/.test(a)), "Restored from a card discarded earlier."] },
           wanted.proposal.said ?? note,
           false,
         );
@@ -5921,14 +5921,14 @@ export function AskPanel({
         log(aiEvent("asked", "add", { text: note }));
         const number = `#${String(addedRow.recordNumber).padStart(4, "0")}`;
         if (about.same) {
-          const words = `${number} already says that: ${addedRow.item}${addedRow.description ? `, "${addedRow.description}"` : ""}. Nothing to change.`;
+          const words = `${number} already reads that way: ${addedRow.item}${addedRow.description ? `, "${addedRow.description}"` : ""}. No changes are needed.`;
           say({ kind: "assistant", text: words, from: "this device" });
           log(aiEvent("answered", "add", { text: words, model: "this device" }));
           return;
         }
         const after: Transaction = about.item ? { ...addedRow, item: about.item } : { ...addedRow, description: about.description ?? addedRow.description };
-        say({ kind: "assistant", ephemeral: true, text: `${number}, the entry just added, with that ${about.item ? "kind" : "description"}. Check it, then apply.`, from: "this device" });
-        say({ kind: "change", plan: { rows: [{ before: addedRow, after }], refused: [] }, state: "open", title: `Edit ${number}`, note: about.item ? `Filed as ${about.item}. The amount, the date and the wallet stay as they are.` : "The description, as you said it. The amount, the date and the wallet stay as they are." });
+        say({ kind: "assistant", ephemeral: true, text: `Here is ${number}, the entry just added, with the new ${about.item ? "category" : "description"}. Review it, then apply.`, from: "this device" });
+        say({ kind: "change", plan: { rows: [{ before: addedRow, after }], refused: [] }, state: "open", title: `Edit ${number}`, note: about.item ? `The category changes to ${about.item}. The amount, date and wallet stay the same.` : "Only the description changes. The amount, date and wallet stay the same." });
         log(aiEvent("proposed", "add", { entry: `Edit ${number}: ${about.item ?? about.description ?? ""}`.slice(0, 200), text: note }));
         return;
       }
@@ -8798,7 +8798,7 @@ export function AskPanel({
           setDraft("");
           say({ kind: "you", text: note });
           log(aiEvent("asked", "add", { text: note }));
-          say({ kind: "change", plan: { rows: [{ before: row, after: { ...row, description: title } }], refused: [] }, state: "open", title: `Edit ${number}`, note: "The description, as you said it. The amount, the date and the wallet stay as they are." });
+          say({ kind: "change", plan: { rows: [{ before: row, after: { ...row, description: title } }], refused: [] }, state: "open", title: `Edit ${number}`, note: "Only the description changes. The amount, date and wallet stay the same." });
           log(aiEvent("proposed", "add", { entry: `Edit ${number}: ${title}`.slice(0, 200), text: note }));
           return;
         }
@@ -8851,7 +8851,7 @@ export function AskPanel({
           const row = lastAdded ? [...transactions].reverse().find((t) => t.recordNumber === lastAdded.recordNumber && Date.now() - savedAt(t) < 3600_000) : undefined;
           if (row) {
             renaming.current = { rowId: row.id };
-            reply = `#${String(row.recordNumber).padStart(4, "0")}, the entry just added: what should its description say?${row.description.trim() ? ` It reads "${row.description.trim()}" now.` : ""}`;
+            reply = `What should the description of #${String(row.recordNumber).padStart(4, "0")}, the entry just added, say?${row.description.trim() ? ` It currently reads "${row.description.trim()}".` : ""}`;
           } else {
             reply =
               "There is no card open to rename. For a saved entry, name the day, the item or the amount, or give the record number, and I will find it for you to edit.";
