@@ -82,10 +82,11 @@ import {
 } from "../domain/capture";
 import { daysIn, readEntry, splitEntries } from "../domain/readEntry";
 import { sameAsBefore, withoutAside, type RecentEntry } from "../domain/entryAside";
+import { aboutLast, discardedNamed, disputedFigure } from "../domain/cardAgain";
 import { namedIn, partsTheModelMissed, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
 import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
 import { cardAccount, cardSlipsIn } from "../domain/cardSlip";
-import { checkCardSlips } from "../domain/proposal";
+import { checkCardSlips, refusalWords } from "../domain/proposal";
 import { readReceipt } from "../domain/receipt";
 import { Rich } from "../components/Rich";
 import {
@@ -4687,8 +4688,8 @@ export function AskPanel({
         });
       }
     }
-    for (const refused of result.refused) {
-      say({ kind: "assistant", text: refused.reason, from: "this device" });
+    for (const words of refusalWords(result.refused)) {
+      say({ kind: "assistant", text: words, from: "this device" });
     }
     return result.proposals.length > 0;
   };
@@ -5847,6 +5848,89 @@ export function AskPanel({
       log(aiEvent("asked", "add", { text: `Again: ${againFrom}`.slice(0, 400) }));
       await sendNow(againFrom, "log");
       return;
+    }
+    /*
+     * About a card already here rather than a new entry (`cardAgain.ts`,
+     * owner, 16 November 2026): "There's no 5650 there" discards the card
+     * that says it, "Re add the food" and "The 650 earlier" bring back the
+     * card discarded, and "Thats treat my friends at the diner" straight
+     * after an entry was added is an Edit of that entry.
+     */
+    if (!as && files.length === 0) {
+      const cardOf = (t: Offered): Draft => t.live ?? t.proposal.draft;
+      const disputed = disputedFigure(lead);
+      if (disputed !== null) {
+        const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open" && cardOf(t).amount === disputed);
+        const gone = turns.some((t) => isOffer(t) && t.state === "discarded" && cardOf(t).amount === disputed);
+        if (open.length > 0 || gone) {
+          setDraft("");
+          emptyBox();
+          say({ kind: "you", text: note });
+          log(aiEvent("asked", "add", { text: note }));
+          if (open.length > 0) {
+            for (const t of open) {
+              const d = cardOf(t);
+              log(aiEvent("rejected", "add", { entry: `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`, text: "Not on the picture, the owner said" }));
+              recordCard({ ...t, state: "discarded" });
+            }
+            setTurns((prev) => prev.map((t) => (isOffer(t) && open.includes(t) ? { ...t, state: "discarded" as const } : t)));
+            const ids = new Set(open.map((t) => t.cardId));
+            if (asking && asking.cards.some((c) => ids.has(c.cardId))) setAsking(null);
+            if (pending && pending.draft.amount === disputed) setPending(null);
+            const flagged = open.some((t) => t.proposal.adjustments.some((a) => /not printed on the picture/i.test(a)));
+            const words = `Discarded the ${formatMoney(disputed)} card${open.length > 1 ? "s" : ""}: nothing from ${open.length > 1 ? "them" : "it"} was saved.${flagged ? " The picture as read on this device does not show it either." : ""}${turns.some((t) => isOffer(t) && t.state === "open" && !open.includes(t)) ? " The other cards stay for you to check." : ""}`;
+            say({ kind: "assistant", text: words, from: "this device" });
+            log(aiEvent("answered", "add", { text: words, model: "this device" }));
+          } else {
+            const words = `The ${formatMoney(disputed)} card is already discarded: nothing from it was saved.`;
+            say({ kind: "assistant", text: words, from: "this device" });
+            log(aiEvent("answered", "add", { text: words, model: "this device" }));
+          }
+          return;
+        }
+      }
+
+      const discarded = turns.filter((t): t is Offered => isOffer(t) && t.state === "discarded");
+      const back = discardedNamed(lead, discarded.map((t) => ({ draft: cardOf(t) })));
+      const wanted = back !== null ? discarded[back] : undefined;
+      if (wanted) {
+        setDraft("");
+        emptyBox();
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        say({ kind: "assistant", ephemeral: true, text: "The card you discarded, as it was. Check it, then add it.", from: "this device" });
+        await offer(
+          { ...wanted.proposal, draft: cardOf(wanted), adjustments: [...wanted.proposal.adjustments.filter((a) => !/^Brought back/.test(a)), "Brought back from the card discarded earlier."] },
+          wanted.proposal.said ?? note,
+          false,
+        );
+        return;
+      }
+
+      const lastCard = [...turns].reverse().find((t) => !(isSaid(t) || isChart(t)));
+      const askedNow = asking !== null && Date.now() - asking.since <= ASKING_GOES_STALE_MS;
+      const justAdded = !pending && !askedNow && lastCard && isOffer(lastCard) && lastCard.state === "added" && lastCard.recordNumber !== undefined ? lastCard : undefined;
+      const savedAt = (t: Transaction): number => Number(/^t-(\d{13})/.exec(t.id)?.[1] ?? 0);
+      const addedRow = justAdded ? [...transactions].reverse().find((t) => t.recordNumber === justAdded.recordNumber && Date.now() - savedAt(t) < 3 * 3600_000) : undefined;
+      const about = addedRow ? aboutLast(lead, addedRow, addedRow.type === "Spending" ? reference.spendingTypes.map((k) => k.name) : []) : null;
+      if (addedRow && about) {
+        setDraft("");
+        emptyBox();
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const number = `#${String(addedRow.recordNumber).padStart(4, "0")}`;
+        if (about.same) {
+          const words = `${number} already says that: ${addedRow.item}${addedRow.description ? `, "${addedRow.description}"` : ""}. Nothing to change.`;
+          say({ kind: "assistant", text: words, from: "this device" });
+          log(aiEvent("answered", "add", { text: words, model: "this device" }));
+          return;
+        }
+        const after: Transaction = about.item ? { ...addedRow, item: about.item } : { ...addedRow, description: about.description ?? addedRow.description };
+        say({ kind: "assistant", ephemeral: true, text: `${number}, the entry just added, with that ${about.item ? "kind" : "description"}. Check it, then apply.`, from: "this device" });
+        say({ kind: "change", plan: { rows: [{ before: addedRow, after }], refused: [] }, state: "open", title: `Edit ${number}`, note: about.item ? `Filed as ${about.item}. The amount, the date and the wallet stay as they are.` : "The description, as you said it. The amount, the date and the wallet stay as they are." });
+        log(aiEvent("proposed", "add", { entry: `Edit ${number}: ${about.item ?? about.description ?? ""}`.slice(0, 200), text: note }));
+        return;
+      }
     }
     /*
      * "I mean allocation", after a message about a budget: that message read

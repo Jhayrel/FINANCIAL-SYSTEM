@@ -18,7 +18,13 @@ export interface ReviewRowAsk {
   readonly keep: boolean;
 }
 
-const NUMBER = /#\s?(\d{1,5})\b|\b(?:record|entry|row|number|no\.?)\s*#?\s?(\d{1,5})\b/i;
+/*
+ * "No." with its point, or "no #", is a number; a bare "no" before a figure
+ * is "there is no": "There's no 5650 there check it again", about a card
+ * the picture did not show, was answered "There is no #5650 in the ledger"
+ * (owner, 16 November 2026).
+ */
+const NUMBER = /#\s?(\d{1,5})\b|\b(?:record|entry|row|number|no\.|no\s*#)\s*#?\s?(\d{1,5})\b/i;
 
 export function readReviewRowAsk(text: string): ReviewRowAsk | null {
   const t = text.trim();

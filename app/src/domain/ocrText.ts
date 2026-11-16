@@ -85,6 +85,17 @@ export function tidyReading(text: string): string {
     .split(/\r?\n/)
     .map((line) =>
       line
+        /*
+         * A 7 in a large bold figure read as a slash: a wallet's "-₱775.00"
+         * came back as "-P//5.00" (owner's receipt, 16 November 2026), so the one
+         * figure on the receipt was not among the amounts the cards are
+         * checked against. Only inside a figure straight after a currency
+         * mark and ending in its two decimals, where a slash cannot be
+         * anything else.
+         */
+        .replace(/(^|[\s(:-])((?:[Pp][Hh][Pp]|[P£$€¥₱]{1,2})\s?)([\d/][\d/,]*\.\d{2})(?!\d)/g, (all, lead: string, mark: string, figure: string) =>
+          figure.includes("/") && /\d/.test(figure.replace(/\//g, "")) ? `${lead}${mark}${figure.replace(/\//g, "7")}` : all,
+        )
         // Any mix of case: a receipt photo's "Total pHP 109.00" (28 September 2026).
         .replace(/(^|[\s(:-])(?:[Pp][Hh][Pp]|[P£$€¥₱]{1,2})\s?(?=\d)/g, "$1₱")
         /*

@@ -139,6 +139,35 @@ export function readMoney(value: unknown): ReturnType<typeof parseAmount> {
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * A debt row's amount, without the sign a statement prints.
+ *
+ * A credit line's history writes what left it with a minus: "DST - ₱0.40",
+ * "Service Fee - ₱35.50", "My Wallet - ₱500.00". Read as printed, each was
+ * a negative figure, and every one was refused as "a debt movement with no
+ * amount in it" (owner's credit line screen, 16 November 2026), three times
+ * over. Which way the money went is the movement's kind (draw, charge,
+ * repay), never the sign, so the size is what is kept.
+ */
+function debtAmount(value: Record<string, unknown>): ReturnType<typeof parseAmount> {
+  const printed = readMoney(value["amountText"]);
+  const typed = readMoney(value["amountPesos"]);
+  const size = (n: ReturnType<typeof parseAmount>): ReturnType<typeof parseAmount> => (n === null || n === 0 ? null : n < 0 ? -n : n);
+  return size(printed) ?? size(typed);
+}
+
+/**
+ * The notices for rows that could not be read, each said once. Three rows
+ * refused for the same reason were three identical messages one under the
+ * other (16 November 2026); now it is one, with how many.
+ */
+export function refusalWords(refused: readonly Refused[]): string[] {
+  const counts = new Map<string, number>();
+  for (const r of refused) counts.set(r.reason, (counts.get(r.reason) ?? 0) + 1);
+  return [...counts].map(([reason, n]) => (n === 1 ? reason : `${n} rows, each for the same reason: ${reason}`));
+}
+
+
 /** Only for saying which two figures disagreed. Display, not arithmetic. */
 const pesos = (centavos: number): string =>
   `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -478,7 +507,7 @@ function readBehalfRow(
   sourceRef: string,
 ): Proposal | Refused {
   const said = BEHALF_WORDS[str(value["debtEffect"]).toLowerCase()];
-  const amount = readMoney(value["amountText"]) ?? readMoney(value["amountPesos"]);
+  const amount = debtAmount(value);
   if (amount === null || amount <= 0) {
     return { sourceRef, reason: "An entry on someone's behalf with no amount in it could not be read." };
   }
@@ -568,7 +597,7 @@ function readDebt(
     adjustments.push(`"${str(value["debt"])}" is not one of your credit lines, so pick which one on the card.`);
   }
   const said = DEBT_EFFECTS[str(value["debtEffect"]).toLowerCase()];
-  const amount = readMoney(value["amountText"]) ?? readMoney(value["amountPesos"]);
+  const amount = debtAmount(value);
   if (amount === null || amount <= 0) {
     return { sourceRef, reason: "A debt movement with no amount in it could not be read." };
   }
@@ -803,9 +832,11 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
+  const { kept, echoes } = withoutSignEchoes(proposals, context.readings ?? [], context.note ?? "");
+  refused.push(...echoes);
   const checked = checkWalletReceipts(checkCardSlips(checkWithdrawal(checkInterest(
     checkReceipts(
-      datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? [], context.note ?? ""), context.readings ?? [], context.readingDays ?? [], asOf),
+      datesFromHeadings(checkAgainstReadings(kept, context.readings ?? [], context.note ?? ""), context.readings ?? [], context.readingDays ?? [], asOf),
       context.receipts ?? [],
       reference.wallets,
       asOf,
@@ -1327,6 +1358,52 @@ function amountsIn(readings: readonly string[]): Set<number> {
     }
   }
   return found;
+}
+
+/**
+ * A card that is another card read again with the peso sign taken for a
+ * digit: "₱650.00" came back as ₱650.00 of food and, beside it, ₱5,650.00
+ * with nothing to say what it was (owner's receipt, 16 November 2026:
+ * "There's no ... there"). The sign is a P with two bars, and a reader that does not
+ * know it sees a 5, a 2 or an 8.
+ *
+ * Left out, and said, only when the picture as read here shows the shorter
+ * figure and not the longer one, and both are the same day out of the same
+ * account: then the paper itself says which is real. Anything less certain
+ * stays a card, flagged by `notOnPaper`.
+ */
+export function withoutSignEchoes(
+  proposals: readonly Proposal[],
+  readings: readonly string[],
+  note = "",
+): { readonly kept: Proposal[]; readonly echoes: Refused[] } {
+  if (readings.length === 0) return { kept: [...proposals], echoes: [] };
+  const shown = amountsIn(readings);
+  const typed = new Set(figuresIn(note));
+  const echoes: Refused[] = [];
+  const kept = proposals.filter((p) => {
+    const long = p.draft.amount;
+    if (long === null || long <= 0 || shown.has(long) || typed.has(long)) return true;
+    const digits = String(long);
+    const twin = proposals.find(
+      (q) =>
+        q !== p &&
+        q.draft.amount !== null &&
+        q.draft.amount > 0 &&
+        String(q.draft.amount) === digits.slice(1) &&
+        shown.has(q.draft.amount) &&
+        q.draft.date === p.draft.date &&
+        q.draft.fromWallet.trim().toLowerCase() === p.draft.fromWallet.trim().toLowerCase() &&
+        q.draft.toWallet.trim().toLowerCase() === p.draft.toWallet.trim().toLowerCase(),
+    );
+    if (!twin || twin.draft.amount === null) return true;
+    echoes.push({
+      sourceRef: p.sourceRef,
+      reason: `${pesos(long)} is the ${pesos(twin.draft.amount)} card read again, with the peso sign taken for a ${digits.charAt(0)}: the picture shows ${pesos(twin.draft.amount)} and no ${pesos(long)}, so it was left out. If it was a second payment, type it.`,
+    });
+    return false;
+  });
+  return { kept, echoes };
 }
 
 /**

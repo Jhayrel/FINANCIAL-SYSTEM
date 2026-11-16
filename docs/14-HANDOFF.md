@@ -3531,6 +3531,39 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
   it, then one line on safe to spend (in the over colour when below zero),
   without saying the change twice.
 
+### 2026-11-15 and 16: the Planner, the bell, the Bin, receipts, and cards spoken about
+
+- **Planner** (`planner.ts`, `monthPlan.ts`, `Planner.tsx`, `AddTransaction.tsx`;
+  `docs/16-PLANNER.md` rule 16). A set-aside plan paid today is no longer
+  taken out of today's safe to spend a second time (`plansCoveredToday`), and
+  a bill plan is held once, not as a bill and a plan both. A plan can close
+  for less ("It cost less: mark it paid"), unlinking a payment asks first, and
+  linking one from the Add form offers "That is all it cost" when the payment
+  is a little short.
+- **Bell** (`bellTarget.ts`, `Notifications.tsx`, `App.tsx`). Opening a
+  finding outlines the part of the screen it is about and says "From the
+  bell" there; a finding can be hidden until it changes, so the list stops
+  repeating itself.
+- **Bin** (`Bin.tsx`). Restore asks first, saying what comes back and what it
+  moves, then offers Undo for a moment after.
+- **Receipts** (`proposal.ts`, `ocrText.ts`, `duplicates.ts`). A row a credit
+  line prints with a minus ("- ₱0.40") is read by its size: every such debt
+  row had been refused as having no amount, the same notice once per row.
+  Notices with one reason are said once, with how many. A bold 7 the device
+  reads as a slash after a currency mark is a 7. A card whose figure is
+  another card's with the peso sign taken for a leading digit is left out,
+  and said, when the picture's own reading shows the shorter figure and not
+  the longer (`withoutSignEchoes`). A picture's figure one digit off a row
+  already saved, same day, same accounts, same thing, says which row on the
+  card (`oneFigureApart`), as a half-hidden figure is misread.
+- **Cards spoken about** (`cardAgain.ts`, wired early in `sendNow`). "There's
+  no 650 there" discards the open card with that figure (a bare "no" before a
+  figure is no longer read as a record number, `reviewAsk.ts`). "Re add the
+  food" and "The 650 earlier" bring back the discarded card as it was. Right
+  after an entry is added, "that's ..." with no figure is an Edit card for
+  that entry's description, or its kind when the words name one. Checked on
+  the emulator with the 15 November backup.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

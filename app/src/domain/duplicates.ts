@@ -168,7 +168,11 @@ export function duplicatesOf(
      */
     const byTotal =
       row.amount !== amount && (row.total === amount || row.total === amount + draft.fee || (draft.fee > 0 && row.amount === amount + draft.fee));
-    if (row.amount !== amount && !byTotal) continue;
+    if (row.amount !== amount && !byTotal) {
+      const misread = options.typed ? null : oneFigureApart(draft, row);
+      if (misread) found.push(misread);
+      continue;
+    }
     const apart = Math.abs(daysBetween(draft.date, row.date));
     const figure = byTotal
       ? `${formatMoney(row.amount)} plus its ${formatMoney(row.fee)} fee there, ${formatMoney(row.total)} in all`
@@ -311,6 +315,48 @@ export function duplicatesOf(
   return found
     .sort((a, b) => b.score - a.score || b.row.recordNumber - a.row.recordNumber)
     .slice(0, options.most ?? 3);
+}
+
+/**
+ * A row read off a picture whose figure is one digit away from a row
+ * already saved: the same payment, misread.
+ *
+ * A credit line's "Paid amount due, ₱3,105.40" sat half under the wallet
+ * app's own menu bar, and came back as a new ₱3,705.40 payment on the same
+ * day, out of the same account, with the payment already in the ledger
+ * (owner, 16 November 2026). Compared on the amount to the centavo,
+ * nothing matched. A figure with centavos, of the same length, differing in
+ * one digit, on the same day or the next, through the same accounts and for
+ * the same thing, is worth saying: never decided, the card says which row
+ * and both figures.
+ */
+function oneFigureApart(draft: Draft, row: Transaction): Duplicate | null {
+  const amount = draft.amount;
+  if (amount === null || amount <= 0 || amount % 100 === 0 || row.amount % 100 === 0) return null;
+  if (!draft.flow || row.type !== draft.flow) return null;
+  const a = String(amount);
+  const b = String(row.amount);
+  if (a.length !== b.length || a.length < 4) return null;
+  let differ = 0;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) differ += 1;
+  if (differ !== 1) return null;
+  const apart = Math.abs(daysBetween(draft.date, row.date));
+  if (apart > 1) return null;
+  if (!same(draft.fromWallet, row.fromWallet) || !same(draft.toWallet, row.toWallet)) return null;
+  if (!agree(draft.item, row.item) && !agree(draft.description, row.description)) return null;
+  const named = [row.fromWallet.trim() && `out of ${row.fromWallet}`, row.toWallet.trim() && `into ${row.toWallet}`].filter(Boolean).join(", ");
+  return {
+    row,
+    certainty: "close",
+    evidence: [
+      `${formatMoney(amount)} here, ${formatMoney(row.amount)} there: one digit apart, as a figure half hidden or misread on a picture is.`,
+      apart === 0 ? `Both dated ${formatMedium(row.date)}.` : `A day apart: this one ${formatMedium(draft.date)}, that one ${formatMedium(row.date)}.`,
+      ...(agree(draft.item, row.item) ? [`Both ${row.item}.`] : []),
+      ...(named ? [`Both ${named}.`] : []),
+      `If it is the same payment, discard this card: ${formatMoney(row.amount)} is already saved.`,
+    ],
+    score: apart === 0 ? 4 : 3,
+  };
 }
 
 /**
