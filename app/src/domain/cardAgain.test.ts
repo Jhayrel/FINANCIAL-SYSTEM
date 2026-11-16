@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { aboutLast, discardedNamed, disputedFigure } from "./cardAgain";
+import { aboutLast, discardedNamed, disputedFigure, pastedDiscarded } from "./cardAgain";
+import { discardedWords } from "./discarded";
 import { emptyDraft, type Draft } from "./entry";
 
 const ASOF = "2026-11-16";
@@ -78,5 +79,19 @@ describe("words about the entry just added", () => {
     for (const said of ["that's wrong", "thats all", "it's a budget", "that was 50", "is that right?", "bought snacks", "treat my friends", "that's it"]) {
       expect(aboutLast(said, last, KINDS), said).toBeNull();
     }
+  });
+});
+
+describe("a discarded card's own line pasted back", () => {
+  const sent = { ...draft(1_000, "", "Sent money via QR to someone"), flow: "Transfer" as const, category: "Transfer" as const, item: "", sentOut: true };
+  const cards = [{ draft: draft(65_000, "Food", "Diner 0042") }, { draft: sent }];
+  it("is that card, however it is wrapped", () => {
+    const w = discardedWords(sent);
+    expect(pastedDiscarded(`This one\n\nDiscarded, not added: ${w.what}\n${w.detail}`, cards)).toBe(1);
+    expect(pastedDiscarded(`Discarded, not added: ${w.what} ${w.detail} this`, cards)).toBe(1);
+  });
+  it("and nothing without the line, or with a line no card has", () => {
+    expect(pastedDiscarded("This one", cards)).toBeNull();
+    expect(pastedDiscarded("Discarded, not added: Transfer, ₱99.00", cards)).toBeNull();
   });
 });

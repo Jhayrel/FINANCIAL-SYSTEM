@@ -23,6 +23,7 @@
  * about a saved entry become an Edit card that changes nothing until
  * applied.
  */
+import { discardedWords } from "./discarded";
 import { kindNamed } from "./entryAside";
 import type { Draft } from "./entry";
 import { parseAmount, type Centavos } from "./money";
@@ -95,6 +96,24 @@ export function discardedNamed(text: string, cards: readonly DiscardedCard[]): n
     return `${d.flow}|${d.amount}|${d.item.toLowerCase()}|${d.fromWallet.toLowerCase()}|${d.date}`;
   };
   return new Set(hits.map(key)).size === 1 ? hits[hits.length - 1]! : null;
+}
+
+const flat = (t: string): string => t.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * A discarded card's own line pasted back: "This one", then "Discarded, not
+ * added: Transfer, ₱25.00 / from Wallet B out of your accounts, ...". It
+ * went to the bin finder, which offered five old rows to bin (owner, 15
+ * November 2026). The card whose line it is, newest first, or null.
+ */
+export function pastedDiscarded(text: string, cards: readonly DiscardedCard[]): number | null {
+  if (!/discarded,?\s+not\s+added\s*:/i.test(text)) return null;
+  const said = flat(text.slice(text.search(/discarded,?\s+not\s+added\s*:/i)));
+  for (let i = cards.length - 1; i >= 0; i -= 1) {
+    const words = discardedWords(cards[i]!.draft);
+    if (said.includes(flat(words.what)) && (!words.detail || said.includes(flat(words.detail).slice(0, 40)))) return i;
+  }
+  return null;
 }
 
 /** "that's", "it was", "it's for": words about the entry just before. */

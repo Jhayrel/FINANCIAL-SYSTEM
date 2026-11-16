@@ -33,7 +33,13 @@ export function suggestedCommands(answer: string): string[] {
     const c = raw ? command(raw) : null;
     if (c && !found.some((f) => f.toLowerCase() === c.toLowerCase())) found.push(c);
   };
-  for (const m of answer.matchAll(/\b(?:type|say|send|write)\s*:?\s*(\*\*[^*\n]{4,90}\*\*|"[^"\n]{4,90}"|“[^”\n]{4,90}”|[a-z][^.\n]{4,90}?)(?=\s+(?:to|and|on|in|here)\b|[.,;!\n]|$)/gi)) add(m[1]);
+  /*
+   * The command ends before "to update it" or a full stop, but not before
+   * "to 750" or inside "1,500.00": the button sent "change the gym
+   * allocation" without its figure, and was asked what should change
+   * (owner, 14 November 2026).
+   */
+  for (const m of answer.matchAll(/\b(?:type|say|send|write)\s*:?\s*(\*\*[^*\n]{4,90}\*\*|"[^"\n]{4,90}"|“[^”\n]{4,90}”|[a-z](?:[^.\n]|\.(?=\d)){4,90}?)(?=\s+(?:to(?!\s+(?:₱|php\s*)?\d)|and|on|in|here)\b|[.,;!](?!\d)|\n|$)/gi)) add(m[1]);
   for (const m of answer.matchAll(/^\s*(?:[-*]\s*)?(\**[A-Za-z][^\n]{4,90}?)\s*$/gm)) add(m[1]);
   return found.slice(0, 2);
 }
@@ -64,4 +70,24 @@ export function withoutCommandLines(answer: string, commands: readonly string[])
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+const FILLER = new Set(["the", "a", "an", "my", "of", "for", "to", "please", "pls", "now", "it", "that"]);
+const keyWords = (t: string): string[] => t.toLowerCase().replace(/[^a-z0-9.\s]/g, " ").split(/\s+/).filter((w) => w && !FILLER.has(w));
+
+/**
+ * The command an answer suggested, when the owner types it without its
+ * figure: "To set this, type change the gym allocation to 750", then
+ * "change the gym allocation", was asked "What should change on Gym?", and
+ * so was "Change the allocation of gym" (owner, 14 November 2026). The
+ * words typed, in any order, are all in the one command suggested, and only
+ * its figure is missing. Null otherwise.
+ */
+export function completedCommand(typed: string, answer: string): string | null {
+  const t = typed.trim();
+  if (!t || /\d/.test(t) || t.endsWith("?") || t.split(/\s+/).length > 10) return null;
+  const mine = keyWords(t);
+  if (mine.length < 2) return null;
+  const fits = suggestedCommands(answer).filter((c) => /\d/.test(c) && mine.every((w) => keyWords(c).includes(w)));
+  return fits.length === 1 ? fits[0]! : null;
 }

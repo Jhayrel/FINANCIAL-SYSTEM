@@ -1450,6 +1450,15 @@ function figuresIn(text: string): Set<string> {
   return new Set([...undated.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{2,})/gi)].map((m) => String(readMoney(m[1] ?? ""))));
 }
 
+/**
+ * A sentence about the entry before it, with no figure of its own: "I spent
+ * 1500 in phone repair cash. its an emergency" made a second card, "I spent
+ * its an emergency", for ₱0.00 of Emergency (owner, 12 November 2026). "It's",
+ * "that's", "because" and the like say why or what, so it goes back on the
+ * entry it is about.
+ */
+const REMARK_ON_IT = /^(?:it'?s|its|it\s+(?:is|was)|that'?s|thats|that\s+(?:is|was)|this\s+(?:is|was)|because|coz|cause|since|kasi|para\s+sa)\b(?![^]*\d)/i;
+
 export function splitEntries(text: string): string[] {
   /*
    * A pasted confirmation is one payment, however many sentences it has
@@ -1489,7 +1498,7 @@ export function splitEntries(text: string): string[] {
       .filter((part) => part.length > 2)
       // A fee cut off on its own, by ", and" or a full stop, goes back on the entry it was charged on.
       .reduce<string[]>((kept, part) => {
-        if (kept.length > 0 && FEE_ONLY.test(part)) kept[kept.length - 1] = `${kept[kept.length - 1]!.replace(/[,\s]+$/, "")}, ${part}`;
+        if (kept.length > 0 && (FEE_ONLY.test(part) || REMARK_ON_IT.test(part))) kept[kept.length - 1] = `${kept[kept.length - 1]!.replace(/[,.\s]+$/, "")}, ${part}`;
         else kept.push(part);
         return kept;
       }, []),

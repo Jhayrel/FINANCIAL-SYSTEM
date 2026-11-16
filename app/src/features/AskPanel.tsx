@@ -82,7 +82,7 @@ import {
 } from "../domain/capture";
 import { daysIn, readEntry, splitEntries } from "../domain/readEntry";
 import { sameAsBefore, withoutAside, type RecentEntry } from "../domain/entryAside";
-import { aboutLast, discardedNamed, disputedFigure } from "../domain/cardAgain";
+import { aboutLast, discardedNamed, disputedFigure, pastedDiscarded } from "../domain/cardAgain";
 import { namedIn, partsTheModelMissed, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
 import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
 import { cardAccount, cardSlipsIn } from "../domain/cardSlip";
@@ -248,7 +248,7 @@ import {
   type Intent as Routed,
 } from "../data/aiClient";
 import { checkWords, withCheckWords, type AnswerCheck } from "../domain/answerCheck";
-import { suggestedCommands, withoutCommandLines } from "../domain/answerCommands";
+import { completedCommand, suggestedCommands, withoutCommandLines } from "../domain/answerCommands";
 import { chatStore } from "../data/chatStore";
 import { readOriginal, readPicture } from "../data/ocr";
 import { holdUpdates } from "../data/updateCheck";
@@ -257,7 +257,7 @@ import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AiWhere, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
 import { fitItem, itemOnList } from "../domain/onList";
-import { carded, cardsIn, drawn, drew, proposed, said, type ChatMessage, type StoredCard } from "../domain/chat";
+import { carded, cardsIn, drawn, drew, proposed, said, workingIn, type ChatMessage, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import { currentScreen } from "./screenReport";
@@ -541,8 +541,8 @@ interface Said {
    * The app's own working behind a model's answer: every figure it was
    * built on, as the device worked them out, opened with "Show the app's
    * working" (owner, 10 November 2026: "fast but still think deep and can
-   * share detailed and accurate results"). This session only: the record
-   * keeps the answer, as before.
+   * share detailed and accurate results"). Kept with the answer in the
+   * record, so a refresh brings it back (`chat.ts`, `said`).
    */
   readonly working?: string | undefined;
   /**
@@ -940,6 +940,7 @@ function rebuildThread(all: readonly ChatMessage[], since: string | null): Turn[
       text: m.text,
       ...(m.from ? { from: m.from } : {}),
       ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
+      ...(workingIn(m) !== null ? { working: workingIn(m) ?? undefined } : {}),
       ...(failedBefore ? { retry: failedBefore } : {}),
     });
   }
@@ -2227,7 +2228,7 @@ export function AskPanel({
     if (isSaid(turn) && turn.held) return;
 
     void chatStore(uid)
-      .record(said(turn.kind, withCheckWords(turn.text, turn.checked), turn.from, turn.described))
+      .record(said(turn.kind, withCheckWords(turn.text, turn.checked), turn.from, turn.described, turn.working))
       .catch(() => {});
   };
 
@@ -2236,7 +2237,7 @@ export function AskPanel({
    * its place when one came, else the first as it was, and either way the
    * one written to the record.
    */
-  type HeldAnswer = { readonly text: string; readonly from: string | undefined; readonly checked?: AnswerCheck | undefined };
+  type HeldAnswer = { readonly text: string; readonly from: string | undefined; readonly checked?: AnswerCheck | undefined; readonly working?: string | undefined };
   const heldAnswers = useRef(new Map<string, HeldAnswer & { readonly settled?: HeldAnswer | null }>());
   /** Held answers already settled: a second look that comes back after its wait is over changes nothing. */
   const settledHeld = useRef(new Set<string>());
@@ -2258,10 +2259,10 @@ export function AskPanel({
     }
     settledHeld.current.add(key);
     heldAnswers.current.delete(key);
-    const kept: HeldAnswer = better ?? { text: first.text, from: first.from, checked: first.checked };
+    const kept: HeldAnswer = { ...(better ?? { text: first.text, from: first.from, checked: first.checked }), working: first.working };
     setTurns((prev) => prev.map((t) => (isSaid(t) && t.held === key ? { ...t, text: kept.text, ...(kept.from !== undefined ? { from: kept.from } : {}), checked: kept.checked, held: undefined } : t)));
     void chatStore(uid)
-      .record(said("assistant", withCheckWords(kept.text, kept.checked), kept.from))
+      .record(said("assistant", withCheckWords(kept.text, kept.checked), kept.from, undefined, kept.working))
       .catch(() => {});
   };
 
@@ -2937,7 +2938,7 @@ export function AskPanel({
    * "Change the title" was asked with no words after it: the next message is
    * the title, for the entry waiting on a question or for this card.
    */
-  const renaming = useRef<"pending" | { readonly cardId: string } | null>(null);
+  const renaming = useRef<"pending" | { readonly cardId: string } | { readonly rowId: string } | null>(null);
 
   const attach = async (given: ArrayLike<File> | null): Promise<void> => {
     if (!given || given.length === 0) return;
@@ -5368,7 +5369,7 @@ export function AskPanel({
     if (answer.source === "model" && after) after(answerText);
     if (holding) {
       const early = heldAnswers.current.get(heldKey);
-      heldAnswers.current.set(heldKey, { text: answerText, from, checked: answer.checked });
+      heldAnswers.current.set(heldKey, { text: answerText, from, checked: answer.checked, working });
       if (early && early.settled !== undefined) settleHeld(heldKey, early.settled);
       // Never held for long: past the wait the first answer is said as it is, its check with it.
       else setTimeout(() => settleHeld(heldKey, null), SECOND_LOOK_WAIT_MS);
@@ -5891,7 +5892,7 @@ export function AskPanel({
       }
 
       const discarded = turns.filter((t): t is Offered => isOffer(t) && t.state === "discarded");
-      const back = discardedNamed(lead, discarded.map((t) => ({ draft: cardOf(t) })));
+      const back = pastedDiscarded(note, discarded.map((t) => ({ draft: cardOf(t) }))) ?? discardedNamed(lead, discarded.map((t) => ({ draft: cardOf(t) })));
       const wanted = back !== null ? discarded[back] : undefined;
       if (wanted) {
         setDraft("");
@@ -7078,7 +7079,13 @@ export function AskPanel({
     const liveLines = monthAllocations(reference.allocations, reportRows, monthOfDay(asOf), asOf).lines.map((l) => l.line);
     const recentTurns = turns.slice(-10);
     const talkedLine = lineTalkedAbout(recentTurns.filter((t): t is Said => isSaid(t) && t.kind === "you").map((t) => t.text), liveLines);
-    const mended = withCommandWordsFixed(note);
+    /*
+     * "change the gym allocation", just after an answer that said to type
+     * it with a figure: the command it suggested, figure and all.
+     */
+    const lastModelAnswer = [...turns].reverse().find((t): t is Said => isSaid(t) && t.kind === "assistant" && !/^this device/i.test(t.from ?? ""));
+    const completed = files.length === 0 && !as && lastModelAnswer ? completedCommand(note, lastModelAnswer.text) : null;
+    const mended = withCommandWordsFixed(completed ?? note);
     const allocationTalk =
       liveLines.length > 0 &&
       (/\ballocat/i.test(mended) ||
@@ -7101,8 +7108,16 @@ export function AskPanel({
        * week by week, rather than asked "for which kind of spending?".
        */
       const unfinished = read?.kind === "ask";
+      /*
+       * Asking for help with where the money goes ("Help me make a
+       * allocation to the money I have now, where it will go ... Like gas,
+       * etc food") is advice across lines, never a change to the one line it
+       * happens to name: it was asked "What should change on Gas?" (owner,
+       * 14 November 2026).
+       */
+      const wantsAdvice = unfinished && /\b(?:help\s+me|can\s+you\s+help|where\s+(?:it|they|the\s+money)\s+(?:will|should|would|can)\s+go|suggest|propos\w*|recommend|what\s*so\s*ever|whatever|so\s+i\s+can)\b/i.test(note);
       const said =
-        unfinished && (/\b(?:until|till|to|by)\s+(?:the\s+)?(?:months?'?s?|end\s+of\s+(?:the\s+)?month)\s*(?:end)?\b|\bend\s+of\s+(?:the\s+)?month\b|\blast\b|\bcover\b|\benough\b/i.test(note) || (allocationTalk && talkedLine !== null && /\b(?:weeks?|weekly|per|how|can you|could you)\b/i.test(note)))
+        wantsAdvice ? null : unfinished && (/\b(?:until|till|to|by)\s+(?:the\s+)?(?:months?'?s?|end\s+of\s+(?:the\s+)?month)\s*(?:end)?\b|\bend\s+of\s+(?:the\s+)?month\b|\blast\b|\bcover\b|\benough\b/i.test(note) || (allocationTalk && talkedLine !== null && /\b(?:weeks?|weekly|per|how|can you|could you)\b/i.test(note)))
           ? null
           : read;
       if (said) {
@@ -8770,7 +8785,25 @@ export function AskPanel({
         log(aiEvent("answered", "add", { text: done, model: "this device" }));
         return;
       }
-      if (title && renameFor !== "pending") {
+      /*
+       * An entry saved a moment ago: its new description as an Edit card,
+       * nothing changed until it is applied ("Fix the description of the
+       * entry", owner, 14 November 2026: "make sure the description will be
+       * editable by ai").
+       */
+      if (title && renameFor !== "pending" && "rowId" in renameFor) {
+        const row = transactions.find((t) => t.id === renameFor.rowId);
+        if (row) {
+          const number = `#${String(row.recordNumber).padStart(4, "0")}`;
+          setDraft("");
+          say({ kind: "you", text: note });
+          log(aiEvent("asked", "add", { text: note }));
+          say({ kind: "change", plan: { rows: [{ before: row, after: { ...row, description: title } }], refused: [] }, state: "open", title: `Edit ${number}`, note: "The description, as you said it. The amount, the date and the wallet stay as they are." });
+          log(aiEvent("proposed", "add", { entry: `Edit ${number}: ${title}`.slice(0, 200), text: note }));
+          return;
+        }
+      }
+      if (title && renameFor !== "pending" && "cardId" in renameFor) {
         const index = turns.findIndex((t) => isOffer(t) && t.state === "open" && t.cardId === renameFor.cardId);
         const turn = turns[index];
         if (turn && isOffer(turn)) {
@@ -8812,8 +8845,17 @@ export function AskPanel({
           renaming.current = { cardId: back.cardId };
           reply = `The card you discarded is open again above. What should its title say?${reads(back.proposal.draft)}`;
         } else {
-          reply =
-            "There is no card open to rename. For a saved entry, name the day, the item or the amount, or give the record number, and I will find it for you to edit.";
+          // No card: the entry this conversation saved last, within the hour, is the one meant.
+          const savedAt = (t: Transaction): number => Number(/^t-(\d{13})/.exec(t.id)?.[1] ?? 0);
+          const lastAdded = [...turns].reverse().slice(0, 12).find((t): t is Offered => isOffer(t) && t.state === "added" && t.recordNumber !== undefined);
+          const row = lastAdded ? [...transactions].reverse().find((t) => t.recordNumber === lastAdded.recordNumber && Date.now() - savedAt(t) < 3600_000) : undefined;
+          if (row) {
+            renaming.current = { rowId: row.id };
+            reply = `#${String(row.recordNumber).padStart(4, "0")}, the entry just added: what should its description say?${row.description.trim() ? ` It reads "${row.description.trim()}" now.` : ""}`;
+          } else {
+            reply =
+              "There is no card open to rename. For a saved entry, name the day, the item or the amount, or give the record number, and I will find it for you to edit.";
+          }
         }
       }
       say({ kind: "assistant", text: reply, from: "this device" });

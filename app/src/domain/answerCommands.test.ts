@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { suggestedCommands, withoutCommandLines } from "./answerCommands";
+import { completedCommand, suggestedCommands, withoutCommandLines } from "./answerCommands";
 
 describe("a command in an answer", () => {
   it("is found when the answer says to type it, or puts it on a line alone", () => {
@@ -23,5 +23,19 @@ describe("a command in an answer", () => {
     expect(suggestedCommands("You can change the allocation on Budget when you are ready.")).toEqual([]);
     expect(suggestedCommands("Make sure you eat well.")).toEqual([]);
     expect(suggestedCommands("Type hello to start.")).toEqual([]);
+  });
+});
+
+describe("the command suggested, typed without its figure", () => {
+  const answer = "At ₱50.00 a session this covers 10 more sessions. To set this, type change the swim allocation to 900.";
+  it("is the command, figure and all, in any order of its words", () => {
+    expect(completedCommand("change the swim allocation", answer)).toBe("change the swim allocation to 900");
+    expect(completedCommand("Change the allocation of swim", answer)).toBe("change the swim allocation to 900");
+  });
+  it("never with a figure of its own, another line, or no suggestion", () => {
+    expect(completedCommand("change the swim allocation to 700", answer)).toBeNull();
+    expect(completedCommand("change the fare allocation", answer)).toBeNull();
+    expect(completedCommand("change the swim allocation", "It is fine as it is.")).toBeNull();
+    expect(completedCommand("swim", answer)).toBeNull();
   });
 });

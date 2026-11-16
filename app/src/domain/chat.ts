@@ -206,8 +206,18 @@ export function said(
    * message may carry, and never the bytes.
    */
   files?: readonly string[],
+  /**
+   * The app's working behind a model's answer ("See the figures behind this
+   * answer"). It went with the session, so a refresh lost it (owner, 10 and
+   * 11 November 2026: "is dissapearing when refresh ... save it all"). Kept
+   * in the `chart` field as `{"working": ...}`: the figures behind an
+   * answer, never an image, inside the bound the rules already set, so it
+   * needs no change to them. Cut at a line, and said so, when too long.
+   */
+  working?: string,
 ): ChatMessage {
   const at = new Date().toISOString();
+  const kept = working ? workingRecord(redact(working)) : null;
   const described = (files ?? [])
     /**
      * Trimmed before the filter: `Boolean` keeps a line of spaces, which
@@ -228,7 +238,33 @@ export function said(
     text: redact(text).slice(0, MAX_TEXT),
     ...(from ? { from: shorten(from, MAX_FROM) } : {}),
     ...(described.length > 0 ? { files: described } : {}),
+    ...(kept ? { chart: kept } : {}),
   };
+}
+
+const CUT_NOTE = "(The rest was too long to keep.)";
+
+/** The working as the `chart` field holds it, inside its bound, or null when there is none. */
+function workingRecord(working: string): string | null {
+  const text = working.trim();
+  if (!text) return null;
+  const whole = JSON.stringify({ working: text });
+  if (whole.length <= MAX_TEXT) return whole;
+  const lines = text.split("\n");
+  while (lines.length > 1 && JSON.stringify({ working: `${lines.join("\n")}\n${CUT_NOTE}` }).length > MAX_TEXT) lines.pop();
+  const cut = JSON.stringify({ working: `${lines.join("\n")}\n${CUT_NOTE}` });
+  return cut.length <= MAX_TEXT ? cut : null;
+}
+
+/** The working kept with an answer, or null. */
+export function workingIn(message: ChatMessage): string | null {
+  if (!message.chart) return null;
+  try {
+    const value = JSON.parse(message.chart) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) && typeof (value as { working?: unknown }).working === "string" ? (value as { working: string }).working : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -256,7 +292,7 @@ export function drew(chart: unknown, title: string, summary: string): ChatMessag
 
 /** The figures back out, or null when the message is not a chart. */
 export function drawn(message: ChatMessage): unknown | null {
-  if (!message.chart) return null;
+  if (!message.chart || workingIn(message) !== null) return null;
   try {
     return JSON.parse(message.chart) as unknown;
   } catch {

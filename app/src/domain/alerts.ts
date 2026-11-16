@@ -49,7 +49,7 @@ import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import { incomeToCome } from "./incomeBudget";
 import type { Account } from "./accounts";
-import { byWhen, coverage, isSave, likelyPayments, misfiledSaving, viewOf, whenOf, type Plan, type PlanView } from "./planner";
+import { byWhen, coverage, isSave, likelyPayments, misfiledSaving, smallRest, viewOf, whenOf, type Plan, type PlanView } from "./planner";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
@@ -1245,7 +1245,9 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         title: `${p.title} was due ${whenOf(p).replace(/^Sometime in /, "in ")}`,
         detail: isSave(p)
           ? `${money(v.left)} not moved into ${p.into} yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Move it, move the date, or skip it in the Planner.`
-          : `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Pay it, move the date, or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
+          : smallRest(p, v.paid, v.left)
+            ? `${money(v.paid)} paid of ${money(p.amount)}, ${money(v.left)} left, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. If it cost less, open it in the Planner and press "It cost less: mark it paid"; if not, pay the rest, move the date, or skip it.`
+            : `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Pay it, move the date, or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
         weight: 92,
       });
       continue;

@@ -676,6 +676,16 @@ function interestWith(payment: Transaction, transactions: readonly Transaction[]
 
 export type PlanState = "later" | "soon" | "today" | "overdue" | "partly" | "paid" | "skipped" | "removed";
 
+/**
+ * A part-paid plan whose rest is small: most likely it cost less than
+ * planned. A plan paid all but a few pesos was left "not paid yet, 2 days
+ * late" on the bell (owner, 16 November 2026). The same threshold the Add
+ * form's "That is all it cost" uses: at most ₱50.00, or a tenth of the plan.
+ */
+export function smallRest(plan: Pick<Plan, "amount">, paid: Centavos, left: Centavos): boolean {
+  return paid > 0 && left > 0 && left <= Math.max(5000, Math.round(plan.amount / 10));
+}
+
 export interface PlanView {
   readonly plan: Plan;
   readonly state: PlanState;

@@ -202,12 +202,17 @@ export function Notifications({
       {open && (
         <div className="fms-notify-panel" role="dialog" aria-label="What needs attention">
           <div className="fms-notify-head">
-            <span className="t-body-strong">What needs attention</span>
-            {shown.length > 0 && (
-              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                {shown.length}, worst first
-              </span>
-            )}
+            <span className="fms-notify-headtext">
+              <span className="t-body-strong">What needs attention</span>
+              {shown.length > 0 && (
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {shown.length}, worst first
+                </span>
+              )}
+            </span>
+            <button type="button" className="t-caption fms-notify-close" onClick={() => setOpen(false)}>
+              Close
+            </button>
           </div>
 
           {status && (
@@ -253,12 +258,29 @@ export function Notifications({
                       <span className="t-caption" style={{ color: "var(--ink-2)" }}>
                         {a.detail}
                       </span>
-                      <span className="t-micro fms-notify-go">{goWords(a)}, and see where</span>
                     </span>
                   </button>
-                  <button type="button" className="t-micro fms-notify-hide" onClick={() => hide(a)} aria-label={`Hide "${a.title}" until it changes`}>
-                    Hide
-                  </button>
+                  {/*
+                    Where it goes and Hide on one line under the words. Hide was a
+                    column of its own the height of the finding, with a rule down
+                    it, which took the width the words needed on a phone (owner,
+                    16 November 2026: "this is bad ui").
+                  */}
+                  <div className="fms-notify-acts">
+                    <button
+                      type="button"
+                      className="t-caption fms-notify-go"
+                      onClick={() => {
+                        setOpen(false);
+                        onOpen(a);
+                      }}
+                    >
+                      {goWords(a)}, and see where
+                    </button>
+                    <button type="button" className="t-caption fms-notify-hide" onClick={() => hide(a)} aria-label={`Hide "${a.title}" until it changes`}>
+                      Hide
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -281,9 +303,12 @@ export function Notifications({
                           </span>
                         </span>
                       </span>
-                      <button type="button" className="t-micro fms-notify-hide" onClick={() => unhide(a)} aria-label={`Show "${a.title}" again`}>
-                        Show again
-                      </button>
+                      <div className="fms-notify-acts">
+                        <span />
+                        <button type="button" className="t-caption fms-notify-hide" onClick={() => unhide(a)} aria-label={`Show "${a.title}" again`}>
+                          Show again
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>

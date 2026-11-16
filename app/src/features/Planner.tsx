@@ -36,7 +36,7 @@ import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "../domain/dates
 import { emptyDraft, type Draft } from "../domain/entry";
 import { formatMoney, type Centavos } from "../domain/money";
 import { monthBrief } from "../domain/monthPlan";
-import { asSaving, asSavingWords, misfiledSaving, paidSoFar, paysPlan, checkPlan, closedViews, coverage, editPlan, groupOpen, isRecurringKind, kindFromHistory, likelyPayments, linkPayments, makePlan, movePlan, movesWords, byWhen, countedWords, dueFor, dueKindOf, NO_DATE, nextMonthEnd, whenOf, type DueKind, planAgain, planKinds, plannedForBudget, planWallets, planInto, isSave, savesOutOfSpending, removePlan, reopenPlan, skipPlan, unlinkPayment, viewOf, walletToPayFrom, type Plan, type PlanGroup, type PlanInput, type PlanView, paysDebt } from "../domain/planner";
+import { asSaving, asSavingWords, misfiledSaving, paidSoFar, paysPlan, checkPlan, closedViews, coverage, editPlan, groupOpen, isRecurringKind, kindFromHistory, likelyPayments, linkPayments, makePlan, movePlan, movesWords, byWhen, countedWords, dueFor, dueKindOf, NO_DATE, nextMonthEnd, whenOf, type DueKind, planAgain, planKinds, plannedForBudget, planWallets, planInto, isSave, savesOutOfSpending, removePlan, reopenPlan, skipPlan, smallRest, unlinkPayment, viewOf, walletToPayFrom, type Plan, type PlanGroup, type PlanInput, type PlanView, paysDebt } from "../domain/planner";
 import { dueDayIn, planDebtLines } from "../domain/planDebt";
 import { ordinalDay } from "../domain/debtWords";
 import { asAmountAndFees } from "../domain/debt";
@@ -731,6 +731,7 @@ function PlanSheet(props: {
    * payment even half way and revert if click accident or add validation").
    */
   const costLess = open && v.paid > 0 && v.left > 0 && !isSave(p) && !paysDebt(p);
+  const likelyLess = costLess && smallRest(p, v.paid, v.left);
   const settle = (): void => {
     void confirm({
       title: `Mark "${p.title}" paid in full?`,
@@ -751,7 +752,8 @@ function PlanSheet(props: {
   };
   const rows: SheetAction[] = open
     ? [
-        ...(costLess ? [{ label: "It cost less: mark it paid", icon: "check" as const, run: settle }] : []),
+        // Not twice: with a small rest it is the button at the top of the sheet.
+        ...(costLess && !likelyLess ? [{ label: "It cost less: mark it paid", icon: "check" as const, run: settle }] : []),
         { label: "Edit", icon: "edit", run: props.onEdit },
         { label: "Move the date", icon: "planner", run: props.onMove },
         { label: "Link a payment I added", icon: "ledger", run: props.onLink },
@@ -808,8 +810,27 @@ function PlanSheet(props: {
         </div>
         {v.paid > 0 && open && <ProgressBar value={v.paid} max={p.amount} label={isSave(p) ? "moved so far" : "paid so far"} />}
 
+        {/*
+          Most of it paid and a little left: most likely it cost less. Said
+          first, with its button, and the "short for it" and "has passed"
+          boxes left out, which were two warnings about a few pesos above the
+          one press that settles it (owner, 16 November 2026).
+        */}
+        {likelyLess && (
+          <Alert
+            status="info"
+            title={`${formatMoney(v.paid)} paid of ${formatMoney(p.amount)}`}
+            action={
+              <Button size="sm" variant="primary" onClick={settle}>
+                It cost less: mark it paid
+              </Button>
+            }
+          >
+            {`${formatMoney(v.left)} is left. If that is all it cost, mark it paid: the plan closes${p.setAside && v.counts ? ` and stops setting ${formatMoney(v.left)} aside` : ""}. If not, pay the rest below.`}
+          </Alert>
+        )}
         {/* Not while an entry looks like its payment already: the money may have gone, not be short. */}
-        {props.short > 0 && !(v.state === "overdue" && maybe.length > 0) && (
+        {props.short > 0 && !likelyLess && !(v.state === "overdue" && maybe.length > 0) && (
           <Alert status="over" title={`${formatMoney(props.short)} short for it`}>
             {isSave(p)
               ? "After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Move part now, or move the date."
@@ -860,7 +881,7 @@ function PlanSheet(props: {
           </Alert>
         )}
         {/* Past its day and open: what to do, the already-paid case first, so nothing is entered twice. */}
-        {v.state === "overdue" && (
+        {v.state === "overdue" && !likelyLess && (
           <Alert status="warn" title={`${formatMedium(p.due)} has passed`}>
             {maybe.length > 0
               ? `Already paid? ${no(maybe[0]!.recordNumber)} on ${formatMedium(maybe[0]!.date)} looks like it: link it below, so it is not entered twice. Not paid yet? Move the date or skip it.`

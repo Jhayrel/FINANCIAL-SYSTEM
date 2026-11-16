@@ -39,3 +39,21 @@ describe("a card's notes, as the card reads now", () => {
     expect(currentNotes(notes, { item: "Random necessities" })).toEqual(notes);
   });
 });
+
+describe("notes the card has since answered", () => {
+  const notes = [
+    "Read as PHP 2,500.00, but the picture shows PHP 25.00. Using PHP 25.00: check it.",
+    "Still needs one thing: the wallet it went to.",
+    'A QR payment, and none of your accounts took in ₱25.00 around November 15, 2026, so it paid for something. Say what it was for, or "sent to someone".',
+    "Booked as Food, which you have used 12 times.",
+  ];
+  it("go once the card says it: sent out of the accounts", () => {
+    expect(currentNotes(notes, { item: "", flow: "Transfer", sentOut: true, toWallet: "" })).toEqual([notes[0]]);
+  });
+  it("and stay while it still lacks it", () => {
+    expect(currentNotes(notes, { item: "", flow: "Spending", toWallet: "" })).toEqual(notes);
+    expect(currentNotes(notes, { item: "Food", flow: "Spending" })).toEqual([notes[0], notes[1], notes[3]]);
+    expect(currentNotes(["Still needs 2 things: the amount, the wallet it went to."], { item: "", flow: "Transfer", amount: 500, toWallet: "" })).toHaveLength(1);
+    expect(currentNotes(["Still needs 2 things: the amount, the wallet it went to."], { item: "", flow: "Transfer", amount: 500, toWallet: "Cash" })).toHaveLength(0);
+  });
+});

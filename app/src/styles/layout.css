@@ -7611,13 +7611,38 @@ button.fms-recent-row:disabled {
   top: 0;
   z-index: 1;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-1) var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
   background: var(--surface);
   border-bottom: 1px solid var(--hairline);
+}
+.fms-notify-headtext {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+.fms-notify-close {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+.fms-notify-close:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.fms-notify-close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .fms-notify-list {
@@ -7652,14 +7677,23 @@ button.fms-recent-row:disabled {
   cursor: pointer;
 }
 
-/* A finding and its Hide, side by side: the finding takes the room, Hide a thumb's width. */
+/*
+ * A finding, then one line under its words: where it goes on the left, Hide
+ * on the right. The words take the panel's whole width.
+ */
 .fms-notify-row {
-  display: flex;
-  align-items: stretch;
+  display: block;
 }
 .fms-notify-row > .fms-notify-item {
-  flex: 1 1 auto;
-  min-width: 0;
+  padding-bottom: 0;
+}
+.fms-notify-acts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  /* Lined up with the words, past the glyph. */
+  padding: 0 var(--space-2) var(--space-1) calc(var(--space-4) + 20px + var(--space-3));
 }
 .fms-notify-hide {
   flex: 0 0 auto;
@@ -7667,7 +7701,7 @@ button.fms-recent-row:disabled {
   min-height: 44px;
   padding: 0 var(--space-3);
   border: 0;
-  border-left: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--ink-3);
   font: inherit;
@@ -7751,11 +7785,26 @@ button.fms-recent-row:disabled {
 }
 
 .fms-notify-go {
-  margin-top: 2px;
-  color: var(--ink-3);
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
   text-decoration: underline;
   text-decoration-color: var(--hairline-strong);
   text-underline-offset: 3px;
+  cursor: pointer;
+}
+.fms-notify-go:hover {
+  color: var(--ink);
+}
+.fms-notify-go:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .fms-notify-empty {
@@ -11148,12 +11197,20 @@ button.fms-recent-row:disabled {
  * sheet, so the list does not read as one more card lying over the page.
  * A tap outside closes it (Notifications.tsx).
  */
+/*
+ * And the list runs to the foot of the screen, over the bottom bar: it
+ * stopped short of it, and the Dashboard's figures showed in the gap and,
+ * on the dark theme, through the faint dimming (owner, 16 November 2026).
+ * The scrim is the app's own, the one the picture viewer uses.
+ */
 @media (max-width: 639px) {
   .fms-notify-panel {
-    max-height: calc(100dvh - var(--fms-topbar-h, 72px) - 96px);
+    /* Clear of the bottom bar and its raised Add button, which draw over the top bar's layer. */
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    max-height: none;
     box-shadow:
       var(--shadow-overlay),
-      0 0 0 100vmax rgba(16, 24, 16, 0.4);
+      0 0 0 100vmax var(--scrim);
   }
 }
 

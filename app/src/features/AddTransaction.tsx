@@ -1802,10 +1802,23 @@ export function AddTransaction({
      * and the offer goes, because by then it would cost more than it returns.
      */
     const was = draft;
+    /*
+     * The wallet the money left, or landed in, is the same wallet whatever
+     * the type: money out of Maya is out of Maya as Spending or as a
+     * Transfer. Switching a card's Spending to Transfer emptied From, and
+     * the owner's edit "didn't change" (15 November 2026). Kept between
+     * Spending and Transfer (out of), and Revenue and Transfer (into);
+     * never to or from a debt, whose wallet means which side it is on.
+     */
+    const outOf = (f: Flow | ""): boolean => f === "Spending" || f === "Transfer";
+    const into = (f: Flow | ""): boolean => f === "Revenue" || f === "Transfer";
+    const plain = !side && !draft.behalf;
     const now: Draft = {
       ...emptyDraft(draft.date),
       flow,
       ...(side ? { behalf: side } : {}),
+      ...(plain && outOf(draft.flow) && outOf(flow) && draft.fromWallet ? { fromWallet: draft.fromWallet } : {}),
+      ...(plain && into(draft.flow) && into(flow) && draft.toWallet ? { toWallet: draft.toWallet } : {}),
       amount: draft.amount,
       description:
         needs(flow, "description") && !suggested.has("description") ? draft.description : "",

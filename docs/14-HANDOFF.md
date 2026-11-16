@@ -3563,6 +3563,28 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
   after an entry is added, "that's ..." with no figure is an Edit card for
   that entry's description, or its kind when the words name one. Checked on
   the emulator with the 15 November backup.
+- **The rest of the 15 November backup's notes.** A discarded card's own
+  line pasted back ("This one" and "Discarded, not added: ...") brings that
+  card back (`pastedDiscarded`). A card's notes follow what it says now
+  (`cardNotes.ts`): "Still needs ... the wallet it went to" and "say what it
+  was for" go once it is sent out of the accounts, and a spending kind's
+  "Booked as" goes from a transfer. The Add form keeps the wallet the money
+  left (Spending and Transfer) or landed in (Revenue and Transfer) when the
+  type changes. "its an emergency" after an entry stays on that entry
+  (`REMARK_ON_IT`, `readEntry.ts`). A command an answer suggests keeps its
+  figure ("change the gym allocation to" a figure), and typed without it
+  takes it (`completedCommand`). A request for help with where the money
+  goes is never "What should change on Gas?". "Fix the description of the
+  entry" with no card open asks what the entry just added should say and
+  makes an Edit card. An answer's working ("See the figures behind this
+  answer") is kept with it in the chat record, inside the `chart` field as
+  `{"working": ...}`, so it needs no change to the database rules and comes
+  back on a refresh (`chat.ts`).
+- **Bell and Planner on a phone.** The bell's list runs from under the top
+  bar to just above the bottom bar, on the app's own scrim, with Close; each
+  finding's "Open ..." and Hide share one line under its words. A late plan
+  with a small rest (`smallRest`, the Add form's threshold) says "If it cost
+  less, mark it paid", and its sheet opens on that button.
 
 ## 6. What the owner has to do
 
