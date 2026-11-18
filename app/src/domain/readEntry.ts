@@ -1470,6 +1470,32 @@ function splitOnAnd(part: string): string[] {
   return out;
 }
 
+/**
+ * "I earned 12000 from my job, half went to maya and half to gcash" is two
+ * entries of PHP 6,000.00, one into each wallet. It was one card of PHP
+ * 12,000.00 into Maya (owner's "//" note of 5 September 2026, replayed on 16
+ * November). Only with one figure before it, and only when it halves to the
+ * centavo: an odd centavo is left whole for the card to ask about.
+ */
+const HALVES =
+  /[,;]?\s*(?:and\s+|then\s+)?half\s+(?:of\s+it\s+)?(?:went\s+|goes\s+|go\s+|was\s+|is\s+|napunta\s+)?(?:to|into|in|sa)\s+(?:my\s+)?(.+?)\s+and\s+(?:the\s+other\s+)?half\s+(?:went\s+|goes\s+|go\s+|was\s+|is\s+|napunta\s+)?(?:to|into|in|sa)\s+(?:my\s+)?(.+?)\s*[,.]?\s*$/i;
+
+function inHalves(part: string): string[] {
+  const m = HALVES.exec(part);
+  if (!m) return [part];
+  const head = part.slice(0, m.index).replace(/[,;\s]+$/, "");
+  const figures = figuresIn(head);
+  if (figures.size !== 1) return [part];
+  const whole = Number([...figures][0]);
+  if (!Number.isInteger(whole) || whole <= 0 || whole % 2 !== 0) return [part];
+  const half = whole / 2;
+  const written = `${Math.floor(half / 100)}${half % 100 === 0 ? "" : `.${String(half % 100).padStart(2, "0")}`}`;
+  const at = [...head.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{2,})/gi)].find((f) => readMoney(f[1] ?? "") === whole);
+  if (!at || at.index === undefined) return [part];
+  const halved = `${head.slice(0, at.index)}${written}${head.slice(at.index + at[0].length)}`;
+  return [`${halved} into ${(m[1] ?? "").trim()}`, `${halved} into ${(m[2] ?? "").trim()}`];
+}
+
 /** The distinct figures written as money in a text, read the way `amountIn` reads one. */
 function figuresIn(text: string): Set<string> {
   // A model number is a name, not a figure written as money (`modelNumbers.ts`).
@@ -1531,7 +1557,8 @@ export function splitEntries(text: string): string[] {
         if (kept.length > 0 && (FEE_ONLY.test(part) || REMARK_ON_IT.test(part))) kept[kept.length - 1] = `${kept[kept.length - 1]!.replace(/[,.\s]+$/, "")}, ${part}`;
         else kept.push(part);
         return kept;
-      }, []),
+      }, [])
+      .flatMap(inHalves),
   );
 
   /**

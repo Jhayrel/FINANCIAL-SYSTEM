@@ -25,3 +25,14 @@ describe("interest worked out from a balance (7 October 2026)", () => {
     });
   });
 });
+
+describe("earned is income, not interest, unless a balance is told (owner's // note of 5 September 2026)", () => {
+  const gcash = (a: string) => (a === "Gcash" ? 27500 : a === "Maya" ? 120000 : 0);
+  it("leaves income split between wallets alone", () => {
+    expect(interestFromBalance("I earned 12000 from my job on the 2nd, half went to maya and half to gcash, then I moved 2000 into savings", accounts, gcash)).toBeNull();
+    expect(interestFromBalance("I earned 6000 today, received in gcash", accounts, gcash)).toBeNull();
+  });
+  it("still reads a balance told with earned", () => {
+    expect(interestFromBalance("my maya is now 1210.50, how much did i earn", accounts, gcash)).toEqual({ account: "Maya", told: 121050, ledger: 120000, gap: 1050 });
+  });
+});

@@ -23,6 +23,12 @@ export interface InterestFromBalance {
 
 // "how much it gain" (owner, 3 November 2026) went to the model, which summed the year's interest instead.
 const EARNS = /\b(?:interest|interests|tubo|earn(?:ed|ing|s)?|kita|gain(?:ed|s)?|grew|grow(?:n|th)?|increased?|nadagdag|lumaki)\b/i;
+/** The words that say growth plainly, with no balance needed. */
+const SAYS_GROWTH = /\b(?:interest|interests|tubo|gain(?:ed|s)?|grew|grow(?:n|th)?|increased?|nadagdag|lumaki)\b/i;
+/** A balance told: "my new balance", "holds", "is now 3500.42". */
+const A_BALANCE = /\b(?:balance|holds?|now|naging)\b|\bis\s+(?:now\s+)?(?:₱|php\s*)?\d/i;
+/** Money said to move, which makes "earned" income rather than a balance. */
+const MONEY_MOVED = /\b(?:went|goes|go)\s+(?:to|into|sa)\b|\b(?:transferr?(?:ed)?|moved?|sent|send|withdr[ae]w\w*|paid|spent|bought|received|salary|sahod|allowance|half)\b/i;
 
 /** The account a sentence names, the longest name first, a name's words before any part in brackets counting too ("maya bank"). */
 export function accountIn(text: string, accounts: readonly string[]): string {
@@ -46,6 +52,14 @@ export function interestFromBalance(
   inContext?: string,
 ): InterestFromBalance | null {
   if (!EARNS.test(text)) return null;
+  /*
+   * "Earned" alone is income, not interest, unless a balance is told and no
+   * money is said to move. "I earned 12000 from framelink on the 2nd, half
+   * went to maya and half to gcash" was answered as Gcash really holding
+   * PHP 12,000.00 (owner's "//" note of 5 September 2026, replayed on 16
+   * November). Interest, tubo, a gain or growth still say it plainly.
+   */
+  if (!SAYS_GROWTH.test(text) && (!A_BALANCE.test(text) || MONEY_MOVED.test(text))) return null;
   /*
    * No account named ("its 3543.08 thats my new balance see how much i
    * earned", 20 October 2026): the one the conversation was about, else the

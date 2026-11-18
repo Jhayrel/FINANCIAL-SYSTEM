@@ -3824,6 +3824,17 @@ clickable".
   the card and survive a refresh.
 - **Corrected finding:** the 18 November Maya Credit borrowing was saved
   with its fees. Nothing to do there.
+- **The "//" notes read again.** None is newer than 15 November, so the 16
+  November pass covered them all; its answers were read again against the
+  code. One had gone wrong since the owner marked it good: "I earned 12000
+  from framelink on the 2nd, half went to maya and half to gcash, then I
+  moved 2000 into reserved fund" was answered as Gcash really holding the
+  whole figure. "Earned" alone set off the interest-from-a-balance reader;
+  it now needs a balance told and no money moving, or interest, tubo or a
+  gain said (`interestAsk.ts`). "Half to A and half to B" is two entries of
+  half each, exact to the centavo (`readEntry.ts` `inHalves`). The 44 notes
+  that need the model still cannot be replayed here, where the model is not
+  reachable.
 
 ## 6. What the owner has to do
 
