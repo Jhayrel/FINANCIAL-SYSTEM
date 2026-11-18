@@ -428,7 +428,12 @@ export function confirmsProposal(said: string): boolean {
   const text = said.trim().toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim();
   if (!text || /\d/.test(text) || text.split(" ").length > 7) return false;
   if (/\b(no|not|don'?t|dont|never|wait|stop|cancel|hindi|huwag|wag)\b/.test(text)) return false;
-  return /^(?:(?:ok(?:ay)?|yes|yeah|yep|sure|sige|oo|go|please|pls|then|now|so|alright|fine)\s+)*(?:(?:please|pls)\s+)?(?:add|set|apply|use|do|save|put|make)\s+(?:it|that|this|those|them|the\s+budget|that\s+one)(?:\s+(?:please|pls|now|in|then|for\s+me|to\s+my\s+budget))*$|^(?:yes|yeah|yep|sige|oo|go\s+ahead|do\s+it)(?:\s+(?:please|pls|go\s+ahead|do\s+it))*$/.test(text);
+  /*
+   * "Update it add it" after a proposal is the same yes, twice (owner, 18
+   * November 2026): it was not read as one, and the budget stayed.
+   */
+  const DO = String.raw`(?:(?:please|pls)\s+)?(?:add|set|apply|use|do|save|put|make|update|change)\s+(?:it|that|this|those|them|the\s+budget|that\s+one)`;
+  return new RegExp(String.raw`^(?:(?:ok(?:ay)?|yes|yeah|yep|sure|sige|oo|go|please|pls|then|now|so|alright|fine)\s+)*${DO}(?:\s+(?:and\s+|then\s+)?${DO})*(?:\s+(?:please|pls|now|in|then|for\s+me|to\s+my\s+budget))*$|^(?:yes|yeah|yep|sige|oo|go\s+ahead|do\s+it)(?:\s+(?:please|pls|go\s+ahead|do\s+it))*$`).test(text);
 }
 
 /**
@@ -495,6 +500,13 @@ function proposalIn(text: string): { readonly value: Centavos; readonly sentence
   const STRONG = /\b(recommend(?:ed|s|ation)?|suggest(?:ed|s|ion)?|propos(?:e|ed|al)|should set|would set|i'?d set|aim for|realistic|reasonable|sensible)\b/i;
   const WEAK = /\bbudget\s+(?:of|for next month|next month)\b|\bnext month'?s budget\b/i;
   const PAST = /(over|exceeded|short|deficit|shortfall|spent|against|was|were|used|already)[^.]{0,18}$/i;
+  /*
+   * The budget as it stands is not a proposal: "Your spending budget of
+   * (the figure set) already fits your money" was taken for one, and "add that
+   * proposed budget" then pointed at the budget already set, not the
+   * higher figure recommended above it (owner, 18 November 2026).
+   */
+  const STANDING = /\b(?:your|the\s+current|current|existing|present|the\s+old|old|set)\s+(?:monthly\s+)?(?:spending\s+|bills?\s+(?:and\s+subscriptions\s+)?)?budget\s+(?:of|is|was|at)\s*$/i;
   const money = new RegExp(MONEY, "gi");
   for (const cue of [STRONG, WEAK]) {
     for (const sentence of sentences) {
@@ -502,6 +514,7 @@ function proposalIn(text: string): { readonly value: Centavos; readonly sentence
       for (const m of sentence.matchAll(money)) {
         const before = sentence.slice(Math.max(0, (m.index ?? 0) - 28), m.index ?? 0);
         if (PAST.test(before)) continue;
+        if (STANDING.test(sentence.slice(Math.max(0, (m.index ?? 0) - 48), m.index ?? 0))) continue;
         const value = figure(m[0]);
         if (value !== null && value > 0) return { value, sentence };
       }
@@ -530,6 +543,8 @@ function proposalIn(text: string): { readonly value: Centavos; readonly sentence
   for (const pattern of patterns) {
     const found = pattern.exec(text);
     if (found?.[1]) {
+      // The budget as it stands, said as such, is not what was proposed.
+      if (STANDING.test(text.slice(Math.max(0, found.index - 20), found.index + found[0].length - found[1].length).replace(/\*/g, ""))) continue;
       const value = figure(found[1]);
       if (value !== null && value > 0) return { value, sentence: sentences.find((x) => x.includes(found[1]!.replace(/\*/g, ""))) ?? "" };
     }

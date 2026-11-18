@@ -899,11 +899,12 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       plans: toCentavos(input.snapshot.safe.plansDue ?? 0),
       spent: assessMonthFor(input.transactions, input.budgets, year, month).spending.spent,
     });
-    if (ib && (ib.cameIn > 0 || ib.over > 0)) {
+    // Always, now: the room the money leaves and an overspent budget matter without new income too (18 November 2026).
+    if (ib) {
       out.push("");
       out.push("## The budget and the money that came in");
       out.push(...incomeBudgetWords(ib, MONTH_NAMES[month - 1] ?? "this month"));
-      out.push("To adjust the budget from income: the parts (spending, bills and subscriptions, kept for savings) add up to no more than came in, and the spending budget stays at or under the most the money keeps, less anything kept for savings and not moved yet. Quote these figures; the owner applies it here by typing \"lower my budget to my money\", \"add the money that came in to my budget, keep 2000 for savings\" or \"base my budget on my 10k income, save 20%\", or on the Budget screen under Budget and your money.");
+      out.push("To adjust the budget from income: the parts (spending, bills and subscriptions, kept for savings) add up to no more than came in, and the spending budget stays at or under the most the money keeps, less anything kept for savings and not moved yet. Quote these figures. To lower the budget to the money, the line is \"lower my budget to my money\"; to raise it, or set it, the line is \"set <month> spending to <figure>\"; never offer \"lower\" for a raise. The owner can also say \"add the money that came in to my budget, keep 2000 for savings\" or use the Budget screen under Budget and your money.");
     }
   }
 

@@ -3877,6 +3877,45 @@ Reproduced on the emulator on a phone; three causes, all fixed.
   and filled the disk, which made 135 test files fail to load. Emptied; it is
   git-ignored. Check its size if a test run suddenly fails wholesale.
 
+### 2026-11-18, evening: a budget conversation that never made its card
+
+Two owner screenshots: "Work out my budget based on the new balance" got
+December; "November" got a recommendation of the most the money covered,
+split as spending plus a made-up "bills" line; "Update it add it" was told the
+budget "already fits" although spending was past it; "Are you sure?" was
+told it could only rise by a few pesos; a "Lower my budget to my money" button
+sat under a raise; "So add that proposed budget" printed a raw "set November
+spending to ..." line under "Pressing the card below" and no card. Replayed
+on the emulator with a stand-in model giving the same answers; every step
+now ends in the right card.
+
+- **The budget already set was read as the proposal** (`budgetAsk.ts`,
+  `STANDING`): "Your spending budget of (the figure set) already fits" made
+  "add that proposed budget" point at the current budget.
+- **"Update it add it", "update it", "ok update it" are a yes**
+  (`confirmsProposal`).
+- **An answer that names its figure is applied as proposed**
+  (`answerProposes`), not read as "fit" from a quoted "lower my budget".
+- **Held to the money** (`incomeBudget.ts` `holdToMoney`). A proposal for
+  the running month at the most the money covers is spending at that figure
+  with the bills budget as set; one above it is brought down; one below is
+  left. The usual-month median is never put on a card for a month already
+  past it.
+- **The model's "set ... spending to ..." line becomes the card**
+  (`answerCommands.ts` `budgetLineIn`), taken out of the answer. The prompt
+  (`functions/api/ai.ts`) now asks for that line and says "my budget" with no
+  month is the running month.
+- **What the model is told** (`incomeBudgetWords`, `aiChatContext.ts`):
+  spending already past the budget, the room from the money held (not only
+  income since the budget was set, the source of "only a few pesos"), bills as
+  their own budget, and `mostWords` naming every part with its figure. "Spent
+  plus safe to spend" left out the money held for allocations, and the
+  model called the gap bills.
+- **No "lower" button under a raise** (`suggestedCommands`).
+- **The device's own reply**: spent past the budget is said as such, with
+  how far the money lets it rise, never "already fits".
+- **A budget "based on the new balance"** is this month's, not next month's.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -172,7 +172,7 @@ import { spentFromLeft } from "../domain/leftOver";
 import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { costOf, incomeOf } from "../domain/totals";
-import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, mostWords, overWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
+import { asksIncomeBudget, budgetFromIncome, checkSplit, holdToMoney, incomeBudget, incomeBudgetWords, mostWords, overWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksNextMonth, asksSafeToSpend, nextMonthWords, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
 import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
@@ -248,7 +248,7 @@ import {
   type Intent as Routed,
 } from "../data/aiClient";
 import { checkWords, withCheckWords, type AnswerCheck } from "../domain/answerCheck";
-import { completedCommand, suggestedCommands, withoutCommandLines } from "../domain/answerCommands";
+import { budgetLineIn, completedCommand, suggestedCommands, withoutCommandLines } from "../domain/answerCommands";
 import { chatStore } from "../data/chatStore";
 import { readOriginal, readPicture } from "../data/ocr";
 import { holdUpdates } from "../data/updateCheck";
@@ -2689,6 +2689,21 @@ export function AskPanel({
       if (turn && isOffer(turn) && turn.state === "open") return { index: i, turn };
     }
     return null;
+  };
+
+  /** The running month's budget against the money held, as the Budget screen works it out. */
+  const moneyThisMonth = () => {
+    const y = Number(asOf.slice(0, 4));
+    const m = Number(asOf.slice(5, 7));
+    const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
+    return incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent, asOf });
+  };
+  /** A budget proposed for the running month, held to what the money covers (`holdToMoney`). */
+  const heldToMoney = (ask: BudgetAsk): { readonly ask: BudgetAsk; readonly note: string } => {
+    if (ask.kind !== "tracks" || ask.by) return { ask, note: "" };
+    if (ask.year !== Number(asOf.slice(0, 4)) || ask.month !== Number(asOf.slice(5, 7))) return { ask, note: "" };
+    const ib = moneyThisMonth();
+    return ib ? holdToMoney(ask, ib) : { ask, note: "" };
   };
 
   /**
@@ -5484,7 +5499,14 @@ export function AskPanel({
       return;
     }
     const from = answer.source === "model" ? model : tookTooLong ? `No answer came within ${CHAT_DEADLINE_MS / 1000} seconds.` : (answer.reason ?? model);
-    const answerText = answer.source === "model" ? withoutFalseDenial(answer.text) : tookTooLong ? `${NOT_ANSWERED} the AI took too long. Your question is kept; press Try again.` : answer.text;
+    /*
+     * A budget the answer proposes, ended with its "set November spending
+     * to ..." line, becomes the card under it. The line was printed for the
+     * owner to type, under "Pressing the card below will update your
+     * November budget", with no card below (18 November 2026).
+     */
+    const proposedLine = answer.source === "model" ? budgetLineIn(answer.text) : null;
+    const answerText = answer.source === "model" ? withoutFalseDenial(proposedLine ? proposedLine.rest : answer.text) : tookTooLong ? `${NOT_ANSWERED} the AI took too long. Your question is kept; press Try again.` : answer.text;
     /*
      * An answer with nothing left to read, empty or only a Plan line, is no
      * answer: the app's own working is said instead, as when no model
@@ -5524,6 +5546,20 @@ export function AskPanel({
      * Entry line and a PHP 1,000.00 card for money not yet spent (4 October
      * 2026). It is a decision; it becomes an entry when the money moves.
      */
+    if (proposedLine && sink.canBudget) {
+      const limitedNow = Object.keys(budgets[asOf.slice(0, 4)]?.categories ?? {});
+      const read = readBudgetAsk(proposedLine.line, reference, asOf, limitedNow);
+      if (read) {
+        const held = heldToMoney(read);
+        const plan = planBudget(held.ask, budgets, asOf, new Date().toISOString());
+        if (!plan.outcome.refused && plan.outcome.written.length > 0) {
+          say({ kind: "budget", plan, state: "open", ask: held.ask, ...(held.note ? { note: held.note } : {}) });
+          log(aiEvent("proposed", "add", { entry: plan.words, text: proposedLine.line }));
+        } else if (plan.outcome.written.length === 0 && !plan.outcome.refused) {
+          say({ kind: "assistant", text: "That budget is already set: nothing to change.", from: "this device", ephemeral: true });
+        }
+      }
+    }
     if (linesOff.current) return;
     if (answer.source === "model" && !isPlan(question)) await offerFromAnswer(answerText);
     // A plan for today is today's money: a Plan line under it is not offered.
@@ -9513,6 +9549,12 @@ export function AskPanel({
            */
           const arrivesNow = income !== null && /\b(?:today|now|ngayon|kanina|this month)\b/i.test(ruled);
           /*
+           * "Work out my budget based on the new balance": the money held now
+           * is this month's, so the budget is this month's. It recommended
+           * December on 18 November 2026, and "November" had to be said.
+           */
+          const fromHeldNow = /\b(?:(?:new|current|my|the)\s+balances?|what\s+i\s+(?:have|hold)\s+(?:now|left)|money\s+(?:i\s+have\s+)?(?:now|left)|wallets?\s+(?:now|hold)|remaining|left\s+this\s+month)\b/i.test(ruled) && !/\bnext\s+month\b/i.test(ruled);
+          /*
            * "is the new budget reasonable?" is about the budget that is set:
            * the month named, else the one whose budget changed last, else
            * this month. It went to next month by default (5 October 2026).
@@ -9538,7 +9580,7 @@ export function AskPanel({
             (judging ? (newestBudgetChange(budgets, asOf) ?? thisMonth) : null) ??
             ((splitAgain || newIncome || checksFit) && advised
               ? { year: advised.advice.year, month: advised.advice.month }
-              : arrivesNow
+              : arrivesNow || fromHeldNow
                 ? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) }
                 : { year: next.year, month: next.month });
           const said = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
@@ -9812,7 +9854,15 @@ export function AskPanel({
       /\b(?:that|it|this|budget|suggest\w*|propos\w*|change|raise)\b/i.test(ruled) &&
       ruled.split(/\s+/).length <= 14;
     const typedMove = couldBudget && !incomePlan ? readBudgetMove(ruled, lastWasBudgetCard) : null;
-    const byAnswer = !typedMove && couldBudget && !incomePlan && (afterIncome || (modelMove !== null && asksToApply));
+    /*
+     * An answer that names the budget it proposes ("I recommend a budget of
+     * PHP 10,100.00 for November") is applied as proposed, further down. It
+     * was read as "fit" from the "lower my budget to my money" it quoted, and
+     * "Update it add it" was told the budget already fits (owner, 18 November
+     * 2026).
+     */
+    const answerProposes = answered !== undefined && proposedBudgetIn(answered.text) !== null;
+    const byAnswer = !typedMove && couldBudget && !incomePlan && (afterIncome || (modelMove !== null && asksToApply && !answerProposes));
     const budgetMove: BudgetMove | null =
       typedMove ??
       (byAnswer
@@ -9851,7 +9901,17 @@ export function AskPanel({
           return;
         }
         if (ib.over <= 0) {
-          answer(`Your spending budget of ${formatMoney(ib.budget)} already fits your money: ${formatMoney(ib.spent)} spent and ${formatMoney(ib.safe)} safe to spend keep up to ${formatMoney(ib.most)}${ib.room > 0 ? `, so it could even rise by ${formatMoney(ib.room)}` : ""}.`);
+          /*
+           * Spent past the budget is not "fits": a month spent past its
+           * budget was told it "already fits your money" (owner, 18
+           * November 2026). What the money covers is said either way.
+           */
+          const past = ib.spent - ib.budget;
+          answer(
+            past > 0
+              ? `You have spent ${formatMoney(ib.spent)}, ${formatMoney(past)} more than your ${formatMoney(ib.budget)} spending budget. Your money covers spending of up to ${formatMoney(ib.most)} this month (${mostWords(ib)}), so the budget can go up by ${formatMoney(ib.room)}. Say "set ${MONTH_NAMES[m - 1] ?? "this month"} spending to ${ib.most / 100}" for a card that does it.`
+              : `Your money covers your ${formatMoney(ib.budget)} spending budget: ${formatMoney(ib.spent)} spent and ${formatMoney(ib.safe)} safe to spend keep up to ${formatMoney(ib.most)}${ib.room > 0 ? `, so it could go up by ${formatMoney(ib.room)}` : ""}.`,
+          );
           return;
         }
         budgetAsk = { kind: "tracks", year: y, month: m, spending: ib.most, billsSubs: ib.billsBudget, scope: "month" };
@@ -10124,6 +10184,21 @@ export function AskPanel({
       const spendingAt = a.fit && !a.fit.fits ? a.fit.spending : a.spending;
       const said = recentProposal.value;
       /*
+       * The month that is running, with a different figure proposed since:
+       * the usual month's median is no budget for a month already past it.
+       * "Update it add it" made a card for spending below what November had
+       * already spent, where the answer it followed proposed the most the
+       * money covered (owner, 18 November 2026). That figure is
+       * taken instead, held to what the money covers (`heldToMoney`).
+       */
+      const running = a.year === Number(asOf.slice(0, 4)) && a.month === Number(asOf.slice(5, 7));
+      const spentNow = running ? assessMonthFor(reportRows, budgets, a.year, a.month).spending.spent : 0;
+      if (running && said !== spendingAt + a.billsSubs && (spendingAt <= spentNow || said > spendingAt + a.billsSubs)) {
+        const held = heldToMoney({ kind: "tracks", year: a.year, month: a.month, total: said, scope: "month" });
+        budgetAsk = held.ask;
+        if (held.note) budgetNote = [budgetNote, held.note].filter(Boolean).join(" ");
+      } else {
+      /*
        * The app's own parts, always: the figure is arithmetic and the model
        * does none. A different total in the answer was put on the card as
        * said, and on 3 October 2026 that was the usual month, PHP 15,122.00,
@@ -10145,6 +10220,7 @@ export function AskPanel({
         { kind: "tracks", year: month.year, month: month.month, ...parts, scope: "month" },
         span ?? { year: month.year, month: month.month, scope: "month", anchored: true },
       );
+      }
     }
     if (!budgetAsk && couldBudget && (saysBudget || yesToBudget)) {
       /*
@@ -10176,6 +10252,10 @@ export function AskPanel({
             : { kind: "tracks", year: target.year, month: target.month, total: proposed, scope: "month" },
           target,
         );
+        // What the model proposed for the running month, held to what the money covers (`heldToMoney`).
+        const held = heldToMoney(budgetAsk);
+        budgetAsk = held.ask;
+        if (held.note) budgetNote = [budgetNote, held.note].filter(Boolean).join(" ");
       }
     }
     /*
@@ -10213,6 +10293,11 @@ export function AskPanel({
       const spentSoFar = assessMonthFor(reportRows, budgets, budgetAsk.year, budgetAsk.month).spending.spent;
       if (spending !== null && spending <= spentSoFar) {
         budgetNote = [budgetNote, `${formatMoney(spentSoFar)} is already spent this month, so a spending budget of ${formatMoney(Math.max(0, spending))} leaves nothing to spend. Change the figures before you apply.`].filter(Boolean).join(" ");
+      }
+      // A figure you typed above what the money covers is yours to set, and said (a proposal was already brought down to it).
+      const covers = spending !== null ? moneyThisMonth() : null;
+      if (spending !== null && covers && spending > covers.most + 100) {
+        budgetNote = [budgetNote, `${formatMoney(spending)} is more than your money covers for spending this month, ${formatMoney(covers.most)}. Apply sets it anyway; change it first if you want it to match.`].filter(Boolean).join(" ");
       }
     }
     if (budgetAsk || saysBudget || yesAfterBudgetTalk || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(ruled))) {

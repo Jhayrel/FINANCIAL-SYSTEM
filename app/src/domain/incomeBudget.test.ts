@@ -48,7 +48,7 @@ describe("plans counted in safe to spend (owner, 27 October 2026)", () => {
     expect(notCounted.most).toBe(1100000);
     expect(counted.safe).toBe(200000);
     expect(counted.plans).toBe(800000);
-    expect(incomeBudgetWords(counted, "November").join(" ")).toMatch(/safe to spend ₱2,000\.00, after ₱8,000\.00 set aside for plans\. The most the spending budget can be with the money held now: ₱11,000\.00 \(spent, plus what the wallets can still pay this month, the ₱8,000\.00 set aside for plans included\)/);
+    expect(incomeBudgetWords(counted, "November").join(" ")).toMatch(/safe to spend ₱2,000\.00, after ₱8,000\.00 set aside for plans\. The most the spending budget can be with the money held now: ₱11,000\.00 \([^)]*₱8,000\.00 set aside for plans and ₱2,000\.00 safe to spend\)/);
   });
 });
 

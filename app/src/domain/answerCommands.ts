@@ -41,7 +41,27 @@ export function suggestedCommands(answer: string): string[] {
    */
   for (const m of answer.matchAll(/\b(?:type|say|send|write)\s*:?\s*(\*\*[^*\n]{4,90}\*\*|"[^"\n]{4,90}"|“[^”\n]{4,90}”|[a-z](?:[^.\n]|\.(?=\d)){4,90}?)(?=\s+(?:to(?!\s+(?:₱|php\s*)?\d)|and|on|in|here)\b|[.,;!](?!\d)|\n|$)/gi)) add(m[1]);
   for (const m of answer.matchAll(/^\s*(?:[-*]\s*)?(\**[A-Za-z][^\n]{4,90}?)\s*$/gm)) add(m[1]);
-  return found.slice(0, 2);
+  /*
+   * Never a button that goes the other way from the answer: "Lower my budget
+   * to my money" sat under an answer raising the budget (owner, 18 November
+   * 2026).
+   */
+  const raises = raisesBudget(answer);
+  return found.filter((c) => !(raises && /^(?:lower|decrease|reduce|cut)\b/i.test(c))).slice(0, 2);
+}
+
+/** An answer that proposes a budget above the one it says is set now. */
+function raisesBudget(answer: string): boolean {
+  const plain = answer.replace(/\*\*/g, "").replace(/,/g, "");
+  if (/\b(?:raise|increase|rise|go\s+up|higher|up\s+by)\b/i.test(plain) && /\bbudget\b/i.test(plain) && !/\b(?:lower|reduce|decrease|cut)\s+(?:it|the|your|my)\b/i.test(plain)) return true;
+  const proposed = /\b(?:recommend|suggest|propose)\w*\s+(?:a\s+)?(?:budget\s+(?:of\s+)?)?(?:₱|php\s*)?(\d+(?:\.\d{1,2})?)/i.exec(plain);
+  const current = /\b(?:current|your|existing)\s+(?:spending\s+)?budget\s+(?:of|is)\s+(?:₱|php\s*)?(\d+(?:\.\d{1,2})?)/i.exec(plain);
+  if (!proposed?.[1] || !current?.[1]) return false;
+  const cents = (v: string): number => {
+    const [whole, frac = ""] = v.split(".");
+    return Number(whole) * 100 + Number(frac.padEnd(2, "0"));
+  };
+  return cents(proposed[1]) > cents(current[1]);
 }
 
 /**
@@ -90,4 +110,17 @@ export function completedCommand(typed: string, answer: string): string | null {
   if (mine.length < 2) return null;
   const fits = suggestedCommands(answer).filter((c) => /\d/.test(c) && mine.every((w) => keyWords(c).includes(w)));
   return fits.length === 1 ? fits[0]! : null;
+}
+
+/**
+ * The line a model ends a budget proposal with ("set November spending to
+ * 12000 and bills to 2000"), and the answer without it: the app makes the
+ * card for it. The line was printed for the owner to type, under "Pressing
+ * the card below will update your November budget", with no card below
+ * (18 November 2026). A whole line only, never a sentence quoting one.
+ */
+export function budgetLineIn(text: string): { readonly line: string; readonly rest: string } | null {
+  const found = /^[ \t>*-]*["“]?(set\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|this\s+month|next\s+month)\b[^\n]*?\bto\b[^\n]*?\d[^\n]*?)["”]?[ \t.]*$/im.exec(text);
+  if (!found?.[1]) return null;
+  return { line: found[1].replace(/[.*"”]+$/g, "").trim(), rest: text.replace(found[0], "").replace(/\n{3,}/g, "\n\n").trim() };
 }

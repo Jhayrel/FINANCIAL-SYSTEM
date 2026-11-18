@@ -31,6 +31,7 @@
  * 6. Nothing is saved without the owner pressing the button, and every
  *    change is one revision in the budget's history, with the reason.
  */
+import type { BudgetAsk } from "./budgetAsk";
 import { wholeRows } from "./covers";
 import { formatMedium, localDay } from "./dates";
 import { formatMoney, parseAmount, type Centavos } from "./money";
@@ -250,8 +251,22 @@ export function checkSplit(ib: IncomeBudget, split: IncomeSplit): SplitCheck {
 }
 
 /** How `most` is made up, in words: plans counted in safe to spend are paid from the budget too. */
-export function mostWords(ib: Pick<IncomeBudget, "plans">): string {
-  return ib.plans > 0 ? `spent, plus what the wallets can still pay this month, the ${formatMoney(ib.plans)} set aside for plans included` : "spent plus safe to spend";
+/**
+ * What the most is made of, every part named with its figure, so the parts
+ * add up to it. "Spent plus safe to spend" left out the money held for
+ * allocations (18 November 2026), and the model filled the
+ * gap by calling it bills.
+ */
+export function mostWords(ib: Pick<IncomeBudget, "plans" | "most" | "spent" | "safe">): string {
+  const held = ib.most - ib.spent - ib.safe - ib.plans;
+  const parts = [
+    `${formatMoney(ib.spent)} spent`,
+    ...(held > 0 ? [`${formatMoney(held)} held for allocations`] : []),
+    ...(ib.plans > 0 ? [`${formatMoney(ib.plans)} set aside for plans`] : []),
+    `${formatMoney(ib.safe)} safe to spend`,
+  ];
+  const last = parts.pop() ?? "";
+  return parts.length > 0 ? `${parts.join(", ")} and ${last}` : last;
 }
 
 /**
@@ -286,8 +301,23 @@ export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[]
   out.push(
     `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}${ib.plans > 0 ? `, after ${formatMoney(ib.plans)} set aside for plans` : ""}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (${mostWords(ib)}).`,
   );
+  /*
+   * Spent past the budget, said plainly, and how far the budget can go from
+   * the money held, which is not only the money that came in. The model read
+   * "it can rise by" a few pesos "at most from this income" as the whole of it and
+   * told the owner the budget could not go up, where the money covered PHP
+   * thousands more (18 November 2026).
+   */
+  if (ib.spent > ib.budget) out.push(`${formatMoney(ib.spent - ib.budget)} has been spent past the spending budget already.`);
   if (ib.over > 0) out.push(overWords(ib.over, ib.most, ib.toCome ?? null));
-  else if (ib.cameIn > 0) out.push(`It can rise by ${formatMoney(Math.min(ib.room, ib.cameIn))} at most from this income; any part kept for savings comes off that.`);
+  else {
+    out.push(
+      `From the money held now the spending budget can go up to ${formatMoney(ib.most)}, ${formatMoney(ib.room)} above what it is. That is what is held, not only what came in${ib.cameIn > 0 ? `: ${formatMoney(Math.min(ib.room, ib.cameIn))} of it came in since the budget was set, and any part kept for savings comes off that` : ""}.`,
+    );
+  }
+  out.push(
+    `Bills and subscriptions have their own budget${ib.billsBudget > 0 ? `, ${formatMoney(ib.billsBudget)}` : ""}: never take them out of the figure above. To propose a change, end the answer with one line on its own, "set ${monthName} spending to" the figure: the app turns that line into a card under the answer, held to what the money covers.`,
+  );
   return out;
 }
 
@@ -530,4 +560,45 @@ export function overWords(over: Centavos, most: Centavos, come: { readonly usual
   return over <= come.toCome
     ? `The spending budget is ${formatMoney(over)} more than the money you hold now can cover. ${usualWords}: if the rest comes as usual, the budget holds, so there is no need to lower it yet. If it will not come, lower it to ${formatMoney(most)}.`
     : `The spending budget is ${formatMoney(over)} more than the money you hold now can cover. ${usualWords}, and even if the rest comes as usual it is ${formatMoney(over - come.toCome)} short: lower it to about ${formatMoney(most + come.toCome)}, or to ${formatMoney(most)} going by the money held now.`;
+}
+
+/**
+ * A budget proposed for the month that is running, held to what the money
+ * covers, the one figure the app works out and the model does not.
+ *
+ * The owner's 18 November 2026 conversation had the model recommend
+ * the same total three times, split differently each time, with a "bills"
+ * line taken out of it. That total is what the money covers for spending (spent, held for
+ * allocations, plans, safe to spend), and bills and subscriptions have a
+ * budget of their own, so taking them out of it short-changed spending.
+ * A proposal at that ceiling is spending at the ceiling with the bills
+ * budget as set; one above it is brought down to it; one below it is left
+ * as proposed. The note says which, and every figure can still be changed
+ * on the card before Apply.
+ */
+export function holdToMoney(
+  ask: BudgetAsk,
+  ib: Pick<IncomeBudget, "most" | "spent" | "safe" | "plans" | "billsBudget">,
+): { readonly ask: BudgetAsk; readonly note: string } {
+  if (ask.kind !== "tracks" || ask.by) return { ask, note: "" };
+  const said = ask.billsSubs ?? ask.billsHint ?? 0;
+  const bills = ib.billsBudget > 0 ? ib.billsBudget : said;
+  const spending = ask.spending ?? (ask.total !== undefined ? ask.total - said : undefined);
+  if (spending === undefined) return { ask, note: "" };
+  // Within a peso of the ceiling is the ceiling: a model rounds.
+  const atCeiling = (v: number | undefined): boolean => v !== undefined && Math.abs(v - ib.most) <= 100;
+  const { total: _total, billsHint: _hint, ...rest } = ask;
+  if (atCeiling(ask.total) || atCeiling(spending + said) || atCeiling(spending)) {
+    return {
+      ask: { ...rest, spending: ib.most, billsSubs: bills },
+      note: `${formatMoney(ib.most)} is what your money covers for spending this month (${mostWords(ib)}). Bills and subscriptions have their own budget${bills > 0 ? `, ${formatMoney(bills)}` : ""}, so nothing is taken out of spending for them.`,
+    };
+  }
+  if (spending > ib.most) {
+    return {
+      ask: { ...rest, spending: ib.most, billsSubs: bills },
+      note: `Brought down to ${formatMoney(ib.most)}, what your money covers for spending this month (${mostWords(ib)}). ${formatMoney(spending)} would be more than you hold.`,
+    };
+  }
+  return { ask, note: "" };
 }
