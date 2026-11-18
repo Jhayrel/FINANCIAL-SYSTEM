@@ -3836,6 +3836,47 @@ clickable".
   that need the model still cannot be replayed here, where the model is not
   reachable.
 
+### 2026-11-18, later: edits that stuck, and the Add form's suggestions
+
+The owner: "i have food 50 then it showed me wrong entry then i go edit and
+change food to other expense etc like the ai wouldn't change like it stick",
+and "the autofill in entry is always innacurate fix it make it ai powered".
+Reproduced on the emulator on a phone; three causes, all fixed.
+
+- **Edit first, on a phone, never reached the card** (`AskPanel.tsx`,
+  `inFormCardId`). The AI screen is built afresh each time it opens and its
+  cards load a moment later; the step that puts the form's edits on the card
+  ran once, before the card was there. The card kept Food, said "Following
+  the form beside this", and Add to ledger on it saved Food. It runs again
+  when the card arrives: the robot changed Food to Random necessities in the
+  form, the card showed it, and Add saved it.
+- **A correction landed on a folded copy** (`twinsOf`, `carryTo`). Two cards
+  for one entry (the same message twice, or the device's reading and the
+  model's) fold the later one as "Same as card 1". Copies match on day,
+  amount, type and kind **or description**, so after "make it random
+  necessities" the edited card, moved to the bottom, became the copy of the
+  unchanged Food card and was folded under it. The change now goes to every
+  copy, and the edited card comes first.
+- **The named-kind rule never undoes a taught correction**: when a lesson
+  set the kind for these words, `followNamedKind` stands down.
+- **The Add form's suggestions** (`domain/formSuggest.ts`). They were the
+  commonest value over the last 200 rows, whatever was typed: Food and Cash
+  for everything. Now the chat's reading (`inferFromHistory`: the words, the
+  item names in them, plans, the note on each kind, the shop's wallet) plus
+  the amount (a bill or subscription by its price, unless the words say
+  otherwise), the kind's own recent wallet (entries of about this amount
+  first), and never a wallet that cannot cover the amount. Each offer says
+  why under the field. A description history does not recognise goes to the
+  model (`classifyItem`, once per description, with AI suggestions on), as
+  an offer, never filled in. Scored on the owner's last 486 entries with
+  only earlier history (scratchpad, never committed): the kind offered from
+  the description was right 87% of the time (was 33%), the wallet 77%
+  (was 50%), and from the amount alone it offers only when clear (28% of
+  entries, 80% right) instead of always (33% right).
+- Found on the way: the emulator's `firebase-debug.log` had grown to 26 GB
+  and filled the disk, which made 135 test files fail to load. Emptied; it is
+  git-ignored. Check its size if a test run suddenly fails wholesale.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

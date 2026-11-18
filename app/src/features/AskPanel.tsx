@@ -1413,6 +1413,14 @@ export function AskPanel({
    * Only the most recent card sent to the form, because only one entry can be
    * in the form at a time. Older ones keep what they held.
    */
+  /** The card most recently sent to the form, by id: the effect below runs again when it arrives. */
+  const inFormCardId = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      const t = turns[i];
+      if (t && isOffer(t) && t.state === "used") return t.cardId;
+    }
+    return "";
+  }, [turns]);
   useEffect(() => {
     if (!formDraft) return;
 
@@ -1452,7 +1460,16 @@ export function AskPanel({
       // something to go back to.
       return prev.map((t, i) => (i === at && isOffer(t) ? { ...t, live: formDraft } : t));
     });
-  }, [formDraft]);
+    /*
+     * Run again when the card arrives, not only when the form changes. On a
+     * phone this panel is built afresh each time the AI screen opens, and its
+     * cards load a moment after: run once, before they were there, the card
+     * never took the form's edit. It went on showing Food after the form was
+     * changed to another kind, and Add to ledger on it saved Food (owner, 18
+     * November 2026: "i go edit and change food to other expense ... it
+     * stick").
+     */
+  }, [formDraft, inFormCardId]);
   const [draft, setDraftState] = useState("");
   /*
    * The box is emptied the moment a message is sent (`sendNow`), and stays
@@ -2675,16 +2692,53 @@ export function AskPanel({
   };
 
   /**
+   * The open cards that are the same entry as the one at `index`: the same
+   * day, amount and type, with the kind or the description in common. One
+   * message read twice (on this device, then by the model) leaves two such
+   * cards, the later folded as "Same as card 1".
+   *
+   * ── Why a change goes to all of them ────────────────────────────────────
+   *
+   * The owner, 18 November 2026: "I have food 50", then changed it to
+   * another kind, "like the ai wouldn't change like it stick". The change
+   * went to one card, which then arrived at the bottom; the other, still
+   * Food, was now the earlier of the two, so it was the one shown in full
+   * and the edited card was folded under it as its repeat. What was on
+   * screen never changed. Now the change is carried to every copy, and the
+   * edited card comes first with its copies folded after it.
+   */
+  const twinsOf = (index: number, before: Draft): Offered[] =>
+    turns.flatMap((t, i) => {
+      if (i === index || !isOffer(t) || t.state !== "open") return [];
+      const other = t.proposal.draft;
+      return repeatsWithin([before, other]).size > 0 || repeatsWithin([other, before]).size > 0 ? [t] : [];
+    });
+
+  /** A copy of a card, given the fields one change moved on it, written so a refresh keeps it. */
+  const carryTo = (twin: Offered, before: Draft, after: Draft, what: string): Offered => {
+    const moved = (Object.keys(after) as (keyof Draft)[]).filter((k) => JSON.stringify(after[k]) !== JSON.stringify(before[k]));
+    const draft = { ...twin.proposal.draft } as Record<string, unknown>;
+    for (const k of moved) draft[k] = after[k];
+    const next: Offered = { ...twin, live: undefined, proposal: { ...twin.proposal, draft: draft as unknown as Draft, adjustments: [...twin.proposal.adjustments, what] } };
+    recordCard(next);
+    return next;
+  };
+
+  /**
    * The card at `index`, changed, arriving again at the bottom under what was
    * said, as the corrections further down do: the same card, keeping its id.
+   * Its copies follow it, changed the same way (`twinsOf`).
    */
   const reviseCard = (index: number, turn: Offered, draft: Draft, what: string, said: string): void => {
     const proposal = { ...turn.proposal, draft, adjustments: [...turn.proposal.adjustments, what] };
     recordCard({ ...turn, proposal, state: "open", live: undefined });
+    const twins = twinsOf(index, turn.proposal.draft).map((t) => carryTo(t, turn.proposal.draft, draft, what));
+    const gone = new Set(twins.map((t) => t.cardId));
     setTurns((prev) => [
-      ...prev.filter((_, i) => i !== index),
+      ...prev.filter((t, i) => i !== index && !(isOffer(t) && gone.has(t.cardId))),
       { kind: "you", text: said },
       { kind: "proposal", proposal, state: "open", cardId: turn.cardId },
+      ...twins,
     ]);
   };
 
@@ -3266,7 +3320,8 @@ export function AskPanel({
      * one entry: a whole message read against one card could name a kind that
      * belongs to another card.
      */
-    const { draft: kept, named: namedKind, checked } = followNamedKind(draft, clause, firstCheck, reference, asOf, proposal.confidence);
+    // A kind you taught for these words stays: a correction you made is never undone by the word it corrected.
+    const { draft: kept, named: namedKind, checked } = teachable ? { draft, named: undefined, checked: firstCheck } : followNamedKind(draft, clause, firstCheck, reference, asOf, proposal.confidence);
 
     const filled: Proposal = {
       ...proposal,
@@ -12291,8 +12346,11 @@ export function AskPanel({
           );
         }
 
+        // Its copies, changed the same way and folded after it (`twinsOf`).
+        const twins = twinsOf(card.index, was).map((t) => carryTo(t, was, now, change.what));
+        const gone = new Set(twins.map((t) => t.cardId));
         setTurns((prev) => [
-          ...prev.filter((_, i) => i !== card.index),
+          ...prev.filter((t, i) => i !== card.index && !(isOffer(t) && gone.has(t.cardId))),
           { kind: "you", text: note },
           {
             kind: "proposal",
@@ -12305,6 +12363,7 @@ export function AskPanel({
             // The same card, corrected, so it keeps its id.
             cardId: card.turn.cardId,
           },
+          ...twins,
         ]);
         return;
       }
