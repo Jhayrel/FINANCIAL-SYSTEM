@@ -376,7 +376,13 @@ export function keepTheMoney(before: Draft, after: Draft, reply = ""): Draft {
    */
   const said = readMoney(reply.replace(/\b(?:today|yesterday|pesos?|php|lang|po|only)\b/gi, " ").trim());
   const amount = (before.amount ?? 0) <= 0 && said !== null && said > 0 && after.amount === said ? said : before.amount;
-  let next: Draft = { ...after, date: before.date, amount };
+  /*
+   * And the fee, unless the answer is about it: "Maya" to "where did it come
+   * from?" was read back with no fee, and an ATM withdrawal saved without its
+   * ₱18.00 (owner's 18 November 2026 backup).
+   */
+  const fee = /\b(?:fee|charge|bayad|singil)\b/i.test(reply) ? after.fee : (before.fee ?? 0) > 0 ? before.fee : after.fee;
+  let next: Draft = { ...after, date: before.date, amount, fee };
   if (incoming && !next.toWallet) next = { ...next, toWallet: before.toWallet };
   if (!incoming && after.flow !== "Transfer" && !next.fromWallet) next = { ...next, fromWallet: before.fromWallet };
   if (after.flow === "Transfer") {

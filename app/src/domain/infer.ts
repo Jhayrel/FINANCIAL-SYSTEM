@@ -421,6 +421,26 @@ export function inferFromHistory(
     }
   }
 
+  /*
+   * A cash withdrawal with a fee and no account named: the account the
+   * withdrawals with a fee into that wallet come from. An ATM slip names a
+   * card, not an account, and "where did it come from?" was asked of a BDO
+   * withdrawal when every withdrawal with a fee into Cash since June had come
+   * from Maya (owner's 18 November 2026 backup). Only when nearly all of them
+   * did; the card says it was guessed.
+   */
+  if (flow === "Transfer" && !next.fromWallet && next.toWallet && (next.fee ?? 0) > 0) {
+    const into = next.toWallet;
+    const known = [...reference.wallets, ...reference.savings];
+    const withFee = transactions.filter((t) => t.type === "Transfer" && t.toWallet === into && t.fee > 0 && t.fromWallet !== "" && t.fromWallet !== into).slice(-20);
+    const { value, count } = commonest(withFee, (t) => t.fromWallet);
+    if (value && known.includes(value) && count >= 3 && count / withFee.length >= 0.8) {
+      next = { ...next, fromWallet: value };
+      unsure.push("fromWallet");
+      because.push(`From ${value}, where your last ${count} withdrawals into ${into} with a fee came from. Change it if this one was not.`);
+    }
+  }
+
   // Everything below leans on the item, so there is nothing more to do
   // without one.
   const item = next.item.trim();

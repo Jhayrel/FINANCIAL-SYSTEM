@@ -657,6 +657,13 @@ export interface ExtractResult {
   readonly repeated?: number;
   /** What the device read off the pictures, for the checks after the model (`statementSense`). */
   readonly readings?: readonly string[];
+  /**
+   * Pictures, by name, that gave nothing: no card, no balance and no row
+   * refused with a reason. Said in the chat when others gave cards, so a
+   * picture is never dropped without a word (owner's 18 November 2026
+   * backup: a credit screen sent with two receipts left no trace).
+   */
+  readonly emptyPictures?: readonly string[];
 }
 
 /**
@@ -1134,9 +1141,19 @@ async function lookFirst(job: {
     }
   }
   const joined = joinAnswers(answers.flat());
+  const emptyPictures = pictures.length > 1 ? emptyOf(pictures, answers) : [];
   // 3 October 2026: a picture read the device's way after the deploy, and the record could not say why.
   const missed = looks.map((_, k) => looked[k]).find((a) => a !== undefined && a.source !== "model")?.reason;
-  return { ...joined, repeated, readings: read, ...(readOnDevice > 0 ? { readOnDevice } : {}), ...(missed ? { sightMissed: missed.slice(0, 160) } : {}) };
+  return { ...joined, repeated, readings: read, ...(readOnDevice > 0 ? { readOnDevice } : {}), ...(missed ? { sightMissed: missed.slice(0, 160) } : {}), ...(emptyPictures.length > 0 ? { emptyPictures } : {}) };
+}
+
+/** The names of the pictures whose answers hold nothing to show: no card, no balance, no row refused with a reason. */
+export function emptyOf(pictures: readonly { readonly name: string }[], answers: readonly (readonly ExtractResult[])[]): string[] {
+  return pictures.flatMap((picture, i) => {
+    const theirs = answers[i] ?? [];
+    const gave = theirs.some((a) => a.proposals.length > 0 || (a.balances?.length ?? 0) > 0 || a.refused.length > 0);
+    return gave ? [] : [picture.name];
+  });
 }
 
 /** The device's reading of a picture, sent beside it to check a figure against, never to read instead of it. */

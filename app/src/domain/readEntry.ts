@@ -1453,7 +1453,15 @@ function splitOnAnd(part: string): string[] {
       /^\s*(?:₱|php\s*)?\d/i.test(piece);
     // A shop's number is not a figure: "I bought food 711, 100 pesos" is one purchase at 7-Eleven, not a ₱0.00 card and a ₱100.00 one (25 October 2026).
     const money = (s: string): boolean => namesMoney(withoutShopNumbers(s, part));
-    if (money(before) && money(piece) && opensAsEntry && !FEE_ONLY.test(piece)) {
+    /*
+     * "at" before a place is English, not the Tagalog "and": "withdrew 3300
+     * at an atm with 18 fee" was cut at "at", and the fee became a sentence
+     * of its own that could not be read (16 November 2026 robot).
+     */
+    const atAPlace = /^\s+at\s+$/i.test(joint) && /^\s*(?:a|an|the|my|our|sm|bdo|bpi|mall|store|shop|atm|home|school|work|office|\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i.test(piece);
+    // A piece whose only figure is a fee belongs to what it was charged on.
+    const onlyAFee = /\b(?:with|plus|and)\s+(?:an?\s+|the\s+)?(?:₱|php\s*)?\d[\d,.]*\s*(?:pesos?\s+)?(?:fee|charge)s?\b/i.test(piece) && (piece.match(/\d[\d,.]*/g) ?? []).length === 1;
+    if (money(before) && money(piece) && opensAsEntry && !FEE_ONLY.test(piece) && !atAPlace && !onlyAFee) {
       out.push(piece);
     } else {
       out[out.length - 1] = `${before}${joint}${piece}`;

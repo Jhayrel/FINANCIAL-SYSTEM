@@ -255,7 +255,8 @@ import { holdUpdates } from "../data/updateCheck";
 import { useBackToClose } from "../data/backButton";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AiWhere, type AttachmentNote } from "../domain/aiLog";
-import { clauseFor, verifyReading } from "../domain/verify";
+import { clauseFor, followNamedKind, verifyReading } from "../domain/verify";
+import { applyCreditConfirms, creditConfirmsIn } from "../domain/creditConfirm";
 import { fitItem, itemOnList } from "../domain/onList";
 import { carded, cardsIn, drawn, drew, proposed, said, workingIn, type ChatMessage, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
@@ -661,6 +662,13 @@ interface DebtChoice {
   /** Someone the sentence named who is not on the debt list yet, offered as a button. */
   readonly newPerson?: string | undefined;
   /**
+   * What the reading found, said on the card: "₱X of fees from the screen
+   * added", "#0090 was saved without these fees". A debt card showed only its
+   * fixed line, so a fee card said nothing about which borrowing it was for
+   * (owner's 18 November 2026 backup, replayed).
+   */
+  readonly notes?: readonly string[] | undefined;
+  /**
    * Stable across a refresh, so the record can say what became of this card.
    *
    * The array index cannot do this job: it identifies a card within one
@@ -1042,6 +1050,7 @@ function turnFromCard(card: StoredCard): Turn {
       draft,
       state: card.state === "open" ? "open" : card.state === "discarded" ? "discarded" : "settled",
       cardId: card.id,
+      ...(card.adjustments && card.adjustments.length > 0 ? { notes: card.adjustments.filter((n): n is string => typeof n === "string").slice(0, 8) } : {}),
     };
   }
 
@@ -1113,7 +1122,10 @@ function storedFrom(turn: Turn): StoredCard | null {
     };
   }
   if (isDebt(turn)) {
-    return { id: turn.cardId, kind: "debt", state: turn.state, draft: turn.draft as unknown as Record<string, unknown> };
+    // The notes, while they fit: a card over the record's limit is not kept at all (`proposed`).
+    let room = 1200;
+    const kept = (turn.notes ?? []).filter((n) => (room -= n.length) >= 0);
+    return { id: turn.cardId, kind: "debt", state: turn.state, draft: turn.draft as unknown as Record<string, unknown>, ...(kept.length > 0 ? { adjustments: kept } : {}) };
   }
   if (!("cardId" in turn) || !turn.cardId) return null;
 
@@ -2095,8 +2107,9 @@ export function AskPanel({
    * knows what is due on it. Every path that makes a debt card comes through
    * here, so a model reading and the rules reading end in the same card.
    */
-  const debtCard = (draft: Draft, text: string): { turn: DebtChoice; notes: readonly string[] } => {
+  const debtCard = (draft: Draft, text: string, said: readonly string[] = []): { turn: DebtChoice; notes: readonly string[] } => {
     const fill = fillDebt(draft, text, debts, transactions, [...reference.wallets, ...reference.savings], asOf);
+    const notes = [...new Set(said.map((n) => n.trim()).filter((n) => n !== ""))];
     return {
       turn: {
         kind: "debt",
@@ -2104,6 +2117,7 @@ export function AskPanel({
         state: "open",
         cardId: newCardId(),
         ...(fill.newPerson ? { newPerson: fill.newPerson } : {}),
+        ...(notes.length > 0 ? { notes } : {}),
       },
       notes: fill.newPerson
         ? [...fill.notes, `**${fill.newPerson}** is not on your debt list yet. Press **Add ${fill.newPerson}** on the card and every movement with them adds up in one place.`]
@@ -3228,27 +3242,42 @@ export function AskPanel({
      * well under a millisecond, with no key and no network, and it cannot be
      * wrong about the ledger in the way a model can.
      */
-    const checked = verifyReading(
+    const clause = /^(?:balance|the balance in the picture|the difference)\b/i.test(proposal.sourceRef.trim()) ? "" : (against ?? proposal.said ?? clauseFor(hint, draft.amount, reference));
+    const firstCheck = verifyReading(
       draft,
       // The clause this row came from, not the whole message. A card the
       // model returned carries no `said`, so it is worked out from the
       // amount; see `clauseFor`.
       // A figure the app worked out (balance less ledger) is checked by its own sum, not against the sentence's bigger figure (20 October 2026).
-      /^(?:balance|the balance in the picture|the difference)\b/i.test(proposal.sourceRef.trim()) ? "" : (against ?? proposal.said ?? clauseFor(hint, draft.amount, reference)),
+      clause,
       reference,
       asOf,
       proposal.confidence,
     );
 
+    /**
+     * The kind you named is the kind it is booked as.
+     *
+     * "106 in food" came back from the model as Online Buy, with a line under
+     * it saying you named Food (owner's 17 November 2026 chat). The check was
+     * right and the card stayed wrong, so the owner had to open the form and
+     * change it. When the clause for this card is one entry and names exactly
+     * one of your own kinds, the card takes that kind and says so. Only for
+     * one entry: a whole message read against one card could name a kind that
+     * belongs to another card.
+     */
+    const { draft: kept, named: namedKind, checked } = followNamedKind(draft, clause, firstCheck, reference, asOf, proposal.confidence);
+
     const filled: Proposal = {
       ...proposal,
-      draft,
+      draft: kept,
       confidence: checked.confidence,
       adjustments: [
         // One reason, said once: the ledger agreeing with a lesson is not a second note about the same item.
         ...proposal.adjustments.filter((note) => !(teachable && note.startsWith(`Booked as ${taught}`))),
         ...(fitted.note ? [fitted.note] : []),
         ...(useHistory ? [...learned, ...because] : because),
+        ...(namedKind !== undefined ? [`Booked as ${namedKind}, which you named.`] : []),
         ...checked.notes,
       ],
     };
@@ -3277,7 +3306,7 @@ export function AskPanel({
           text: hint,
         }),
       );
-      say(debtCard(filled.draft, hint).turn);
+      say(debtCard(filled.draft, hint, proposal.adjustments).turn);
       return null;
     }
 
@@ -3478,6 +3507,15 @@ export function AskPanel({
      */
     const amountHere = asking.blank === "amount" ? answerCard(before, "amount", note, reference, transactions, creditLines) : null;
     if (amountHere) filled = amountHere;
+    /*
+     * One of the answers offered, tapped or typed: applied here, at once, and
+     * nothing else on the card moves. A tap on "Maya" went to the model to be
+     * read with the pictures again; on a phone that was ten seconds of a
+     * button that seemed to do nothing, and the card came back without its
+     * ₱18.00 fee (owner, 18 November 2026: "un responsive ... un clickable").
+     */
+    const offered = asking.choices.find((c) => c.trim().toLowerCase() === note.trim().toLowerCase());
+    if (!filled && offered) filled = answerCard(before, asking.blank, offered, reference, transactions, creditLines);
     if (!filled && !ai.disabled) {
       const read = await extractProposals({
         note: cardAnswerNote(before, asking.text, note),
@@ -3972,7 +4010,7 @@ export function AskPanel({
      * files each one as School.
      */
     const typed = sent.length === 0 && note.trim() !== "" ? totalsIn(note) : null;
-    const result = {
+    const typedRead = {
       ...read,
       proposals: (typed ? withoutTheTotal(notedCards, typed.totals).cards : notedCards).map((p) => {
         if (!typed) return p;
@@ -3980,6 +4018,27 @@ export function AskPanel({
         return filed === p ? { ...p, typed: true } : { ...filed, typed: true, adjustments: [...p.adjustments.filter((a) => !/^Booked as /.test(a)), saidItemWords(typed.item ?? "", typed.aside)] };
       }),
     };
+    /*
+     * A credit line's confirm screen, read on this device (domain/creditConfirm.ts):
+     * the borrowing with its fees, or the fees a saved borrowing is missing.
+     * The amount and fees must add up to the total on the screen to the
+     * centavo, or nothing is read. Works with the model down, since the
+     * figures are checked here (owner's 18 November 2026 backup).
+     */
+    const confirmsRead = sent.length > 0 ? creditConfirmsIn(typedRead.readings ?? []) : [];
+    const withConfirms = confirmsRead.length > 0
+      ? applyCreditConfirms(typedRead.proposals, confirmsRead, {
+          text: (typedRead.readings ?? []).join("\n"),
+          lines: creditLines,
+          wallets: [...reference.wallets, ...reference.savings],
+          transactions,
+          asOf,
+        })
+      : typedRead.proposals;
+    const result =
+      withConfirms === typedRead.proposals
+        ? typedRead
+        : { ...typedRead, proposals: withConfirms, ...(typedRead.source === "offline" && withConfirms.length > 0 ? { source: "device" as const } : {}) };
     /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
     const route = result.readOnDevice ? `, read on this device${result.sightMissed ? ` (Gemini could not: ${result.sightMissed.split(/[.:]/)[0]?.trim() ?? result.sightMissed})` : ""}` : "";
 
@@ -4285,6 +4344,21 @@ export function AskPanel({
             : ""),
         from: `${result.source === "device" ? "this device" : `${modelLabel(result.model ?? "") || "the provider"}${route}`}`,
       });
+      /*
+       * A picture that gave nothing is named, never dropped without a word.
+       * On 18 November 2026 a credit screen went with two receipts, the
+       * receipts came back as cards and the credit screen left no trace, so
+       * the borrowing and its fees were never offered.
+       */
+      // A confirm screen read here came off one of them: said on its card instead.
+      const empty = confirmsRead.length > 0 ? [] : (result.emptyPictures ?? []);
+      if (empty.length > 0) {
+        say({
+          kind: "assistant",
+          text: `Nothing came off ${empty.length === 1 ? empty[0] : `${empty.slice(0, -1).join(", ")} or ${empty[empty.length - 1]}`}. Say "${empty.length === 1 ? "read the other one" : "read the missing ones"}" to try ${empty.length === 1 ? "it" : "them"} again, or type what ${empty.length === 1 ? "it shows" : "they show"}.`,
+          from: "this device",
+        });
+      }
     }
 
     /**
@@ -16960,6 +17034,12 @@ function DebtCard({
           {duplicateHeadline(twins[0])} Add it only if it is a second, separate one.
         </p>
       )}
+
+      {(turn.notes ?? []).map((note) => (
+        <p key={note} className="t-micro fms-proposalnote">
+          {note}
+        </p>
+      ))}
 
       <div className="fms-proposalactions">
         <Button

@@ -3778,6 +3778,53 @@ picture. What still came back wrong, fixed:
     other flags were the robot's own: a card it did not expect where the
     app rightly asks to confirm, and the AI blocked on purpose.
 
+### 2026-11-18: a card's question that did nothing, a lost fee, and a credit screen with no card
+
+From the owner's 18 November backup and four pictures: "the one question
+about card that is so un responsive like it didn't do anything its un
+clickable".
+
+- **A tapped answer did nothing for ten seconds or more.** Every reply to a
+  card's question, a tapped choice too, went to the model to be read again,
+  with nothing changing on screen. A choice the panel offered is now applied
+  on the device at once (`AskPanel.tsx` `answerAsked`, `answerCard`); only a
+  typed reply the device cannot place goes to the model. Checked on the
+  emulator on a phone: the tap changes the card straight away.
+- **The answer lost the fee.** "Maya" to "Where did it come from?" came back
+  with no fee, and the ATM withdrawal was saved without it. `keepTheMoney`
+  keeps the card's fee unless the answer is about the fee.
+- **A withdrawal's source is filled in from history** (`infer.ts`): money
+  into Cash with a fee, no source named, takes the account at least 80% of
+  the last withdrawals with a fee came from (3 or more), marked unsure with
+  "Change it if this one was not". The question is then not needed.
+- **"at an ATM" no longer splits one withdrawal into two cards**, nor does a
+  lone "and 10 fee" (`readEntry.ts` `splitOnAnd`).
+- **The kind you named is the kind it is booked as** (`verify.ts`
+  `followNamedKind`). "106 in food" came back from the model as Online Buy
+  with a warning under it; the warning was right and the card stayed wrong.
+  When the clause is one entry and names exactly one of the owner's kinds,
+  the card takes it and says "Booked as Food, which you named."
+- **A picture that gives nothing is named** (`aiClient.ts` `emptyOf`,
+  `emptyPictures`). The credit screen sent with two receipts left no trace.
+  The chat now says "Nothing came off IMG.jpg. Say "read the other one" to
+  try it again, or type what it shows."
+- **A credit line's confirm screen is read on the device**
+  (`domain/creditConfirm.ts`). The amount, each fee (service fee,
+  documentary stamp tax) and the total credit amount are read, and only
+  when amount plus fees equals the total to the centavo; labels beside,
+  under, or in a separate column all work, and a rate like "(5.00%)" is never
+  a fee. Then, first that applies: a borrowing card for that amount gets the
+  fees; a borrowing saved in the last week without fees gets a fee card
+  naming its record; money in read as income becomes the borrowing; or a new
+  borrowing card is made. Read correctly off the owner's real screenshot on
+  the emulator. The prompt has the same rule for the model
+  (`functions/api/ai.ts`).
+- **Debt cards say why** (`DebtChoice.notes`): the reading's notes ("#0090
+  was saved without these fees") were dropped from debt cards. They show on
+  the card and survive a refresh.
+- **Corrected finding:** the 18 November Maya Credit borrowing was saved
+  with its fees. Nothing to do there.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -3839,6 +3886,12 @@ picture. What still came back wrong, fixed:
     on the 6th it closes (early, never late) and shows less credit left than
     Maya does. The chat sets the first: "Maya Credit is due 15 days after
     the bill closes".
+
+11. **#4049, the BDO ATM withdrawal of 18 November (found 18 November).**
+    Saved with a fee of ₱0.00; the slip shows an ₱18.00 fee taken with it.
+    Until it is edited, Maya in the app is ₱18.00 above Maya's own balance.
+    Database, #4049, Edit, Fee ₱18.00, Save. Reported, never changed from
+    here.
 
 ---
 

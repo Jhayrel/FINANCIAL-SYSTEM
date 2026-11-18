@@ -55,6 +55,12 @@ export interface Verified {
   readonly findings: readonly Finding[];
   /** The same, as lines for the card. */
   readonly notes: readonly string[];
+  /**
+   * The one kind of theirs the sentence names, when the row says another:
+   * the card takes it (`AskPanel`). "106 in food" came back as Online Buy
+   * from the model, with the warning under it (owner, 17 November 2026).
+   */
+  readonly namedItem?: string;
   /** Every field this flow requires is filled in. */
   readonly ready: boolean;
   /** The ones that are not, when it is not. */
@@ -273,6 +279,7 @@ export function verifyReading(
   const findings: Finding[] = [];
   const sentence = said.trim();
   const flat = flatten(sentence);
+  let namedItem: string | undefined;
 
   // ── The figure ──────────────────────────────────────────────────────────
   /**
@@ -346,6 +353,7 @@ export function verifyReading(
 
     if (spoken.length === 1) {
       const only = spoken[0] ?? "";
+      if (chosen !== only) namedItem = only;
       if (chosen !== only) {
         findings.push({
           check: "item",
@@ -392,6 +400,7 @@ export function verifyReading(
   return {
     findings,
     notes: findings.map((f) => f.says),
+    ...(namedItem !== undefined ? { namedItem } : {}),
     ready: missing.length === 0,
     missing,
     // A reading with a question hanging over it was never high confidence.
@@ -413,4 +422,28 @@ function inWords(field: FieldName): string {
     default:
       return field;
   }
+}
+
+/**
+ * The card takes the kind the clause names.
+ *
+ * Only when the clause is one entry and names exactly one of your own kinds
+ * for this flow, and the reading chose another (owner, 17 November 2026: "106
+ * in food" read as Online Buy). A whole message read against one card could
+ * name a kind that belongs to another card, so a clause with two entries in
+ * it changes nothing. The row is checked again after, so the line saying the
+ * kind was wrong goes away with the mistake.
+ */
+export function followNamedKind(
+  draft: Draft,
+  clause: string,
+  first: Verified,
+  reference: ReferenceLists,
+  asOf: string,
+  was: Confidence,
+): { draft: Draft; named: string | undefined; checked: Verified } {
+  const named = first.namedItem !== undefined && splitEntries(clause).length <= 1 ? first.namedItem : undefined;
+  if (named === undefined) return { draft, named, checked: first };
+  const next = { ...draft, item: named };
+  return { draft: next, named, checked: verifyReading(next, clause, reference, asOf, was) };
 }
