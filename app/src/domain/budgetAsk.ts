@@ -576,7 +576,18 @@ export function asksRatherThanTells(said: string): boolean {
      */
     (/\b(?:can|could)\s+(?:we|i)\b/.test(t) && /\?/.test(t)) ||
     /\blet\s+me\s+know\s+(?:if|whether)\b|\btell\s+me\s+(?:if|whether)\b/.test(t);
-  return opinion && !polite;
+  /*
+   * A question about a figure, or asking for help, is never a command to
+   * change a row: "If you removed debt how much it total?" listed the bin,
+   * and "Can you help me change?" was answered "No entry matches that"
+   * (owner, 19 November 2026, who then had to say "Thats a question" five
+   * times in a row).
+   */
+  const plainlyAsks =
+    (/\bhow\s+(?:much|many)\b/.test(t) && (/\?\s*$/.test(t) || /^\s*(?:if|kung|what\s+if|so|and|but)\b/.test(t))) ||
+    /^\s*(?:can|could|will|would)\s+you\s+(?:help|explain|tell|show|teach|guide|advise)\b[^?]*\?\s*$/.test(t) ||
+    /^\s*if\s+you\s+(?:removed?|took|take|left|leave|excluded?|added?|counted?)\b/.test(t);
+  return plainlyAsks || (opinion && !polite);
 }
 
 /**

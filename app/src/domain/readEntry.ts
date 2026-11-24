@@ -66,6 +66,12 @@ export interface ReadEntry {
    */
   readonly readsAsDebt: boolean;
   /**
+   * Bought with a credit line: what it bought, as a spend from the wallet
+   * the borrowing lands in, dated with it. The chat offers it beside the
+   * borrowing card (`debtSentence.ts`, bought).
+   */
+  readonly boughtWith?: Draft | undefined;
+  /**
    * A debt payment said to include interest, with no figure for it: "I paid
    * 1000 including its interest". The chat asks for the figure off the bill
    * rather than assuming a rate.
@@ -970,6 +976,22 @@ export function readEntry(
     const partial =
       sent.fee > 0 && (moved.debtEffect === "repay" || moved.debtEffect === "lend") ? { ...moved, fee: sent.fee } : moved;
 
+    /*
+     * What the credit line paid for: the kind named, from the owner's own
+     * list or their history, and the words for the description.
+     */
+    const boughtWith: Draft | undefined = debtSaid?.bought
+      ? (() => {
+          const kinds = reference.spendingTypes.map((k) => (typeof k === "string" ? k : k.name));
+          const said = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+          const named = [...kinds, ...reference.bills, ...reference.subscriptions].sort((x, y) => y.length - x.length).find((k) => said.includes(` ${k.toLowerCase()} `));
+          const item = named ?? itemFromHistory(text, transactions.filter((t) => t.type === "Spending"))?.item ?? "";
+          const category = reference.bills.includes(item) ? "Bills" : reference.subscriptions.includes(item) ? "Subscriptions" : "Spending";
+          const what = /\bfor\s+(?:my\s+|the\s+|a\s+)?([a-z][a-z ]{1,40}?)\s+(?:using|with|via|thru|through|by)\b/i.exec(text)?.[1]?.trim() ?? "";
+          return { ...emptyDraft(partial.date), flow: "Spending", category, item, description: what || item.toLowerCase(), amount: partial.amount, fromWallet: partial.toWallet, status: "Paid" } as Draft;
+        })()
+      : undefined;
+
     return {
       draft: partial,
       because: forSomeone
@@ -982,6 +1004,7 @@ export function readEntry(
       readsAsDebt,
       interestUnstated: debtSaid?.interestUnstated ?? false,
       passThrough: passing,
+      ...(boughtWith ? { boughtWith } : {}),
     };
   }
 

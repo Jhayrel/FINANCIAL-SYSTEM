@@ -256,7 +256,7 @@ export function fitNote(answer: string, day: { readonly today: Centavos; readonl
  * before the reply, and the reply starts by saying whether it was wrong.
  */
 const CHALLENGE =
-  /\b(?:why (?:did |do |would |are |were )?you (?:say|said|saying|suggest\w*|recommend\w*|tell|told|mention\w*|includ\w*|put|think|thought)|why (?:suggest|say|recommend)\w*|how (?:do|did|can|could|would) you (?:even )?(?:say|buy|suggest|get|think|recommend|call|afford)|(?:that'?s|that is|it'?s|you'?re|you are|this is) (?:wrong|not right|incorrect|mistaken|a mistake|not true)|you (?:said|told me|suggested)|but you said|contradict\w*|(?:does ?n'?t|don'?t) make sense|makes no sense|you made a mistake|mali (?:ka|yan|iyan|yun))\b/i;
+  /\b(?:why (?:did |do |would |are |were )?you (?:say|said|saying|suggest\w*|recommend\w*|tell|told|mention\w*|includ\w*|put|think|thought)|why (?:suggest|say|recommend)\w*|how (?:do|did|can|could|would) you (?:even )?(?:say|buy|suggest|get|think|recommend|call|afford)|(?:that'?s|thats|that is|it'?s|its|you'?re|you are|this is) (?:wrong|not right|incorrect|mistaken|a mistake|not true|not (?:the )?(?:real|correct|right|accurate|actual)\b)|(?:are you sure|is that (?:right|correct|true|accurate)|not accurate|that'?s not it)|you (?:said|told me|suggested)|but you said|contradict\w*|(?:does ?n'?t|don'?t) make sense|makes no sense|you made a mistake|mali (?:ka|yan|iyan|yun))\b/i;
 
 export const challengesAnswer = (text: string): boolean => CHALLENGE.test(text);
 

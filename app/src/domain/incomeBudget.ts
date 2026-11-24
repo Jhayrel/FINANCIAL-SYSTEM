@@ -430,8 +430,15 @@ const toCentavosSaid = (digits: string, k: string | undefined): Centavos => {
 export function readIncomePlan(text: string): IncomePlanAsk | null {
   const t = text.trim();
   if (!/\bbudget\b/i.test(t)) return null;
-  if (!/\b(?:income|salary|sahod|kita|earn(?:ing|ings)?|earned)\b/i.test(t)) return null;
-  if (!/\b(?:base[sd]?|from|out of|using|with|set|make|plan|split|income[- ]based)\b/i.test(t)) return null;
+  /*
+   * "Work out my budget with my new revenue", "Re work my budget based on the
+   * money that I recieved", "adjust my budget based on income this month and
+   * not debt" (owner, 19 and 20 November 2026): income said every way they
+   * say it, and the verbs they use. Each went to a usual-month median, for
+   * December, or below what November had already spent.
+   */
+  if (!/\b(?:income|salary|sahod|kita|earn(?:ing|ings)?|earned|revenue|money\s+(?:that\s+)?(?:i\s+)?(?:received|recieved|recived|got|earned)|what\s+(?:came|comes)\s+in)\b/i.test(t)) return null;
+  if (!/\b(?:base[sd]?|from|out of|using|with|set|make|plan|split|income[- ]based|work(?:ed)?\s+out|re-?\s*work|adjust|redo|recompute|recalculate)\b/i.test(t)) return null;
   // A question about the budget against income is answered, never made a card (`asksIncomeBudget`).
   if (/\?\s*$/.test(t) && !/\b(?:can you|could you|please|pls)\b/i.test(t)) return null;
 
@@ -465,7 +472,9 @@ export function readIncomePlan(text: string): IncomePlanAsk | null {
    * me know if we can higher up the budget this month" was a budget card
    * (owner, 17 November 2026: "Thats Question").
    */
-  if ((income === null || income <= 0) && keep === null && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any|let\s+me\s+know|tell\s+me|can\s+(?:we|i)|could\s+(?:we|i)|whether|if\s+(?:we|i)\s+can|is\s+it|do\s+you\s+think|possible)\b/i.test(t)) return null;
+  // "can we just adjust my budget based on income" asks for it done; "let me know if we can" asks whether.
+  const request = /\b(?:can|could)\s+(?:we|you|i)\s+(?:just\s+|please\s+)?(?:adjust|set|change|base|make|update|re-?\s*work|redo|work\s+out)\b/i.test(t);
+  if ((income === null || income <= 0) && keep === null && !request && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any|let\s+me\s+know|tell\s+me|can\s+(?:we|i)|could\s+(?:we|i)|whether|if\s+(?:we|i)\s+can|is\s+it|do\s+you\s+think|possible)\b/i.test(t)) return null;
   return { income: income !== null && income > 0 ? income : null, keep };
 }
 

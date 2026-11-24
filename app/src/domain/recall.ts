@@ -101,6 +101,11 @@ const OUR_OWN_WORDS =
  */
 const DAY_WORDS = /\b(yesterday|today|tonight|morning|afternoon|evening|day|days|ago)\b/gi;
 
+/** Taking something out of a sum or a figure, said as arithmetic: never a row to delete or restore. */
+export function talksArithmetic(text: string): boolean {
+  return /\b(?:equation|calculation|computation|compute|formula|the\s+math|(?:in|from|out\s+of)\s+the\s+(?:total|sum|count|figure|income|revenue)|only\s+(?:the\s+)?(?:real|true|actual)\s+(?:revenue|income|money)|(?:without|minus|less|excluding|remove[ds]?|removing|take\s+out)\s+(?:the\s+)?(?:debt|borrow\w*|loans?|credit)\b[^.]{0,30}\b(?:total|income|revenue|how\s+much))\b/i.test(text);
+}
+
 export function detectRecall(text: string): Recall | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -113,6 +118,12 @@ export function detectRecall(text: string): Recall | null {
       : null;
   if (!action) return null;
 
+  /*
+   * Taking something out of a sum is arithmetic, not a row to delete:
+   * "Like remove debt in the equation only real revenue" was answered "No
+   * entry matches that" (owner, 19 November 2026).
+   */
+  if (talksArithmetic(trimmed)) return null;
   const phrase = trimmed.replace(INSTRUCTION, " ").replace(/\s+/g, " ").trim();
   return { action, phrase };
 }

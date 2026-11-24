@@ -90,6 +90,7 @@ import { checkCardSlips, refusalWords } from "../domain/proposal";
 import { readReceipt } from "../domain/receipt";
 import { Rich } from "../components/Rich";
 import {
+  talksArithmetic,
   saysLatestIsWrong,
   detectRecall,
   detectSweep,
@@ -256,7 +257,9 @@ import { useBackToClose } from "../data/backButton";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AiWhere, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, followNamedKind, verifyReading } from "../domain/verify";
+import { interestIfWords, readInterestIf } from "../domain/interestIf";
 import { applyCreditConfirms, creditConfirmsIn } from "../domain/creditConfirm";
+import { pairCreditPurchases } from "../domain/creditPurchase";
 import { fitItem, itemOnList } from "../domain/onList";
 import { carded, cardsIn, drawn, drew, proposed, said, workingIn, type ChatMessage, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
@@ -2698,6 +2701,15 @@ export function AskPanel({
     const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
     return incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent, asOf });
   };
+  /** The bills a month keeps inside a total: the latest month before it with bills set, back across New Year, else the month's own bills. */
+  const latestBills = (year: number, month: number): Centavos => {
+    for (let back = 1; back <= 12; back += 1) {
+      const i = year * 12 + (month - 1) - back;
+      const b = budgets[String(Math.floor(i / 12))]?.billsSubs?.[i % 12] ?? 0;
+      if (b > 0) return b;
+    }
+    return monthBills(transactions, reference, year, month, asOf).total;
+  };
   /** A budget proposed for the running month, held to what the money covers (`holdToMoney`). */
   const heldToMoney = (ask: BudgetAsk): { readonly ask: BudgetAsk; readonly note: string } => {
     if (ask.kind !== "tracks" || ask.by) return { ask, note: "" };
@@ -4105,10 +4117,12 @@ export function AskPanel({
           asOf,
         })
       : typedRead.proposals;
+    // A purchase paid with a credit line, read as two cards: the spend from where the borrowing lands, on its day (`creditPurchase.ts`).
+    const paired = sent.length > 0 ? pairCreditPurchases(withConfirms) : withConfirms;
     const result =
-      withConfirms === typedRead.proposals
+      paired === typedRead.proposals
         ? typedRead
-        : { ...typedRead, proposals: withConfirms, ...(typedRead.source === "offline" && withConfirms.length > 0 ? { source: "device" as const } : {}) };
+        : { ...typedRead, proposals: paired, ...(typedRead.source === "offline" && paired.length > 0 ? { source: "device" as const } : {}) };
     /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
     const route = result.readOnDevice ? `, read on this device${result.sightMissed ? ` (Gemini could not: ${result.sightMissed.split(/[.:]/)[0]?.trim() ?? result.sightMissed})` : ""}` : "";
 
@@ -5548,7 +5562,17 @@ export function AskPanel({
      */
     if (proposedLine && sink.canBudget) {
       const limitedNow = Object.keys(budgets[asOf.slice(0, 4)]?.categories ?? {});
-      const read = readBudgetAsk(proposedLine.line, reference, asOf, limitedNow);
+      const said = readBudgetAsk(proposedLine.line, reference, asOf, limitedNow);
+      /*
+       * "set December to 14272 total" keeps the month's bills inside the
+       * total, as typed totals do: the card made PHP 14,272.00 of spending
+       * and PHP 0.00 of bills from an answer that split it 12,750 and 1,522
+       * (owner, 19 November 2026).
+       */
+      const read =
+        said && said.kind === "tracks" && said.total !== undefined && said.billsSubs === undefined && said.billsHint === undefined
+          ? { ...said, billsHint: forecastFor(said.year, said.month)?.billsSubs ?? latestBills(said.year, said.month) }
+          : said;
       if (read) {
         const held = heldToMoney(read);
         const plan = planBudget(held.ask, budgets, asOf, new Date().toISOString());
@@ -6091,6 +6115,20 @@ export function AskPanel({
        */
       const openCard = !pending && !askedNow && lastCard && isOffer(lastCard) && lastCard.state === "open" ? lastCard : undefined;
       const openDraft = openCard ? cardOf(openCard) : undefined;
+      /*
+       * A day, and nothing else, is the card's date: "Yesterday" beside a
+       * receipt's card became its description (owner, 20 November 2026: "the
+       * card changes the description rather than date").
+       */
+      const dayOnly = openCard && openDraft && SAYS_A_DAY_ONLY.test(lead) ? amend(openDraft, lead, reference, asOf) : null;
+      if (openCard && openDraft && dayOnly && dayOnly.draft.date !== openDraft.date) {
+        setDraft("");
+        emptyBox();
+        log(aiEvent("asked", "add", { text: note }));
+        reviseCard(turns.indexOf(openCard), openCard, { ...openDraft, date: dayOnly.draft.date }, `Dated ${formatMedium(dayOnly.draft.date)}, as you said.`, note);
+        say({ kind: "assistant", ephemeral: true, text: `The card is now dated ${formatMedium(dayOnly.draft.date)}. Check it, then add it.`, from: "this device" });
+        return;
+      }
       const aboutOpen = openCard && openDraft && openDraft.flow === "Spending" ? aboutLast(lead, openDraft, reference.spendingTypes.map((k) => k.name)) : null;
       if (openCard && openDraft && aboutOpen) {
         setDraft("");
@@ -9478,6 +9516,21 @@ export function AskPanel({
       const pace = !affordish && !budgetish && !spent && !earned && !owes && !essay && !wantsChart(note) ? readPaceAsk(ruled, knownItems) : null;
       // "What did I save this month?": moved into savings, from the ledger (`savedAsk.ts`).
       const savedQ = !affordish && !budgetish && !spent && !earned && !owes && !pace && !essay && !wantsChart(note) ? readSavedAsk(ruled, asOf) : null;
+      /*
+       * "If I have 1 million in Maya Bank, how much interest will it gain?":
+       * at the rate the account actually earned, worked out here. The model
+       * made a rate from one credit and answered about a tenth of what the
+       * account's own rate gave (owner, 20 November 2026).
+       */
+      const interestIf = !affordish && !budgetish && !essay ? readInterestIf(ruled, [...reference.wallets, ...reference.savings]) : null;
+      if (interestIf) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const reply = interestIfWords(interestIf, reportRows, asOf);
+        await answerWithModel(`What the money would earn, worked out by the app from the interest the account was actually credited and the balance it held each day. Answer with these figures, in your own words, and do no arithmetic of your own:\n${reply}`, reply);
+        return;
+      }
       if (savedQ) {
         setDraft("");
         say({ kind: "you", text: note });
@@ -10955,7 +11008,7 @@ export function AskPanel({
     const askedToFind = as
       ? null
       : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf, talkedAbout ?? lastRead.current?.account) ??
-        (!essay && routed?.intent === "investigate"
+        (!essay && routed?.intent === "investigate" && !challengesAnswer(ruled) && !asksRatherThanTells(ruled) && talksBalance(ruled)
           ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ?? {
               account: "",
               actual: null,
@@ -12090,8 +12143,14 @@ export function AskPanel({
       localRecall === null &&
       !/#\s*\d|\b(entry|entries|record|records|saved|yesterday)\b/i.test(note) &&
       amend(shownCard.turn.proposal.draft, note, reference, asOf) !== null;
+    /*
+     * The router's guess at a delete, a restore or an edit is not taken for a
+     * question, a dispute of the last answer, or arithmetic: "Like remove debt
+     * in the equation only real revenue" and "Can you help me change?" were
+     * answered "No entry matches that" (owner, 19 November 2026).
+     */
     const saysRecall =
-      !cardTakesIt && !asksRatherThanTells(ruled) && (routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry");
+      !cardTakesIt && !asksRatherThanTells(ruled) && !challengesAnswer(ruled) && !talksArithmetic(ruled) && (routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry");
     const recall =
       files.length > 0 || as
         ? null
@@ -12801,6 +12860,26 @@ export function AskPanel({
             }),
           );
           say(card.turn);
+          /*
+           * Bought with the line: the purchase beside the borrowing, from the
+           * wallet the borrowing lands in and on its day, so the two cancel
+           * in that wallet and the spending is counted once (owner, 20
+           * November 2026: "if i pay using credit add it like paying using
+           * credit").
+           */
+          if (local.boughtWith) {
+            const lands = card.turn.draft.toWallet || local.boughtWith.fromWallet;
+            await offer(
+              {
+                draft: { ...local.boughtWith, date: card.turn.draft.date, amount: card.turn.draft.amount ?? local.boughtWith.amount, fromWallet: lands },
+                confidence: "medium",
+                sourceRef: "your message, read on this device",
+                adjustments: [`Paid with ${debts.find((d) => d.id === card.turn.draft.debtId)?.name ?? "the credit line"}: the borrowing card above brings the money into ${lands || "the wallet"}, and this spends it there. Add both.`],
+                said: note,
+              },
+              note,
+            );
+          }
           return;
         }
 
@@ -17231,3 +17310,17 @@ function mostMoved(drafts: readonly Draft[]): string {
   const [best, n] = [...count].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
   return n * 2 > drafts.length ? best : "";
 }
+
+/**
+ * A message about what an account holds: the only kind the difference finder
+ * takes from the router's guess. "That's not the real revenue, thats a revenue
+ * with debt" was sent there and asked for a balance to check (owner, 19
+ * November 2026, replayed 24 November).
+ */
+function talksBalance(text: string): boolean {
+  return /\b(?:balance|holds?|held|in\s+my\s+(?:wallet|account|bank|cash|gcash|maya)|really\s+(?:have|has|hold)|actual(?:ly)?\s+(?:have|has|hold)|missing|difference|mismatch|(?:does\s*n'?t|don'?t|not)\s+match|reconcile|discrepanc\w*|off\s+by|short\s+by)\b/i.test(text);
+}
+
+/** A day, said on its own: "Yesterday", "it was last Sunday", "Nov 19", "2026-11-19". */
+const SAYS_A_DAY_ONLY =
+  /^\s*(?:(?:no[,.]?\s+)?(?:it|that|this)\s+(?:was|is)\s+|(?:on|dated?|date\s+(?:is|was)|make\s+it|change\s+(?:the\s+)?date\s+to)\s+)?(?:yesterday|today|kahapon|ngayon|(?:last\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{1,2}\s+days?\s+ago|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+20\d{2})?|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|20\d{2}-\d{2}-\d{2})\s*[.!]?\s*$/i;

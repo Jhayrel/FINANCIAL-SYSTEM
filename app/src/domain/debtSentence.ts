@@ -64,6 +64,13 @@ export interface DebtSentence {
   readonly interest: Centavos | null;
   /** It says the payment included interest and gives no figure for it. */
   readonly interestUnstated: boolean;
+  /**
+   * Bought with the credit line: "I paid 500 for food using maya credit".
+   * The effect is a draw, and the purchase it paid for is a spend beside it
+   * (owner, 20 November 2026: "if i pay using credit add it like paying
+   * using credit").
+   */
+  readonly bought?: boolean | undefined;
 }
 
 const MONEY = String.raw`(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)(?:\s*(?:pesos?|php))?`;
@@ -212,6 +219,14 @@ export function readDebtSentence(
   const rest = amountOf(without);
 
   const borrowing = BORROW_VERB.test(text);
+  /*
+   * Paying for something with the line, not paying the line: a draw, and
+   * the purchase beside it. "paid my maya credit" is a repayment and has no
+   * "with/using/via" before the line's name.
+   */
+  if (!borrowing && PAID_WITH.test(text) && /\b(?:paid|pay|payed|bought|buy|purchased?|spent|spend|ordered|order|binili|bumili)\b/i.test(text)) {
+    return { effect: "draw", amount: rest, charges: fees.total, interest: null, interestUnstated: false, bought: true };
+  }
   // Paying still to come is not paying: only with a borrowing, so "will pay 500" alone stays a payment.
   const payWords = borrowing ? text.replace(PAY_LATER, " ") : text;
   const paying = PAY_VERB.test(payWords) && !PAID_WITH.test(payWords);

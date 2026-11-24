@@ -145,6 +145,19 @@ export interface AiContext {
     /** Money already held when counting started. Not earnings. */
     readonly openingBalance: number;
   };
+  /**
+   * This month's money in, income and borrowing apart. The model was asked
+   * whether November's income included what was borrowed and
+   * answered yes, no and yes again (owner, 19 November 2026): the year's
+   * figures were in front of it and the month's were not.
+   */
+  readonly monthIncome?: {
+    readonly name: string;
+    readonly trueIncome: number;
+    readonly borrowed: number;
+    readonly sources: string;
+    readonly lenders: string;
+  };
   readonly topSpending: readonly { readonly category: string; readonly amount: number }[];
   readonly bills: {
     readonly overdue: readonly string[];
@@ -307,6 +320,21 @@ export function buildContext(input: ContextInput): AiContext {
   const positions = positionsOf(credits, transactions, asOf);
   // Held money is left out, and money kept as yours counted, by `incomeQuality` itself (19 October 2026 audit).
   const quality = incomeQuality(transactions, credits, { start: `${year}-01-01`, end: asOf });
+  const monthStart = `${asOf.slice(0, 7)}-01`;
+  const monthQuality = incomeQuality(transactions, credits, { start: monthStart, end: asOf });
+  const inMonth = transactions.filter((t) => t.date >= monthStart && t.date <= asOf);
+  const sumBy = (rows: readonly Transaction[], key: (t: Transaction) => string): string => {
+    const by = new Map<string, number>();
+    for (const t of rows) by.set(key(t), (by.get(key(t)) ?? 0) + t.total);
+    return [...by.entries()].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${formatMoney(v)}`).join(", ");
+  };
+  const monthIncome = {
+    name: `${monthName(month)} ${year}`,
+    trueIncome: pesos(monthQuality.trueIncome),
+    borrowed: pesos(monthQuality.borrowed),
+    sources: sumBy(inMonth.filter((t) => t.type === "Revenue" && t.category !== "Opening" && !/^(?:cash on hand|transfer of balance)$/i.test(t.item.trim())), (t) => t.item.trim() || "No item"),
+    lenders: sumBy(inMonth.filter((t) => t.type === "Debt" && t.debtEffect === "draw" && credits.some((d) => d.id === t.debtId && d.kind === "payable" && d.form !== "pass-through")), (t) => credits.find((d) => d.id === t.debtId)?.name ?? (t.item.trim() || "a loan")),
+  };
 
   const live = accounts.filter((a) => !a.archived);
 
@@ -414,6 +442,7 @@ export function buildContext(input: ContextInput): AiContext {
       return { own: pesos(b.own), borrowed: pesos(b.inHand), held: pesos(b.heldForOthers), from: b.inHand > 0 ? lenderNames(lent, credits) : "", heldFor: heldFor.join(" and ") };
     })(),
 
+    monthIncome,
     income: {
       cashIn: pesos(quality.cashIn),
       trueIncome: pesos(quality.trueIncome),
@@ -842,6 +871,15 @@ export function contextToText(c: AiContext): string {
     // Draws are Debt rows, outside cash in: "of which" said they were inside it (backup of 7 October 2026).
     `Cash in ${php(c.income.cashIn)}, ${php(c.income.openingBalance)} of it already held when counting started. True income ${php(c.income.trueIncome)}. Borrowed besides, never income: ${php(c.income.borrowed)}.`,
   );
+
+  if (c.monthIncome) {
+    const mi = c.monthIncome;
+    lines.push("");
+    lines.push(`## Money in, ${mi.name}`);
+    lines.push(`Income, never counting borrowing: ${php(mi.trueIncome)}${mi.sources ? ` (${mi.sources})` : ""}.`);
+    lines.push(`Borrowed, which is not income: ${php(mi.borrowed)}${mi.lenders ? ` (${mi.lenders})` : ""}.`);
+    lines.push(`Income and borrowing together: ${php(Math.round((mi.trueIncome + mi.borrowed) * 100) / 100)}. "Real revenue", "income without debt" and "income" all mean the first figure; it never includes the borrowing.`);
+  }
 
   if (c.topSpending.length > 0) {
     lines.push("");

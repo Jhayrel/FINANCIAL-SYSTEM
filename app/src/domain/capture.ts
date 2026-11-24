@@ -227,8 +227,16 @@ const ONE_MISSED =
 
 export const saysOneWasMissed = (note: string): boolean => ONE_MISSED.test(note) && note.trim().split(/\s+/).length <= 14;
 
+/**
+ * "Retry the entry", "redo the receipt", "try the picture again": the last
+ * pictures, read again. "Retry the entry" was read as a new entry and asked
+ * how much it was (owner, 20 November 2026: "it should know when to retry").
+ */
+const RETRY_IT =
+  /^\s*(?:(?:please|pls|can\s+you|could\s+you)\s+)?(?:re-?\s*try|redo|re-?do|try\s+again|read\s+again|scan\s+again|re-?scan|re-?read|re-?check)\s+(?:the|my|that|this|it|last)?\s*(?:entry|entries|receipt|receipts|picture|pictures|photo|photos|image|images|screenshot|screenshots|card|one|last\s+one|upload)(?:\s+again)?(?:\s+(?:please|pls))?\s*[.!]*\s*$|^\s*(?:try|read|scan)\s+(?:the|that|this|my)\s+(?:entry|receipt|picture|photo|image|screenshot|card)\s+again\s*[.!]*\s*$/i;
+
 export const asksToReadAgain = (note: string): boolean =>
-  (READ_AGAIN.test(note) || ONE_MISSED.test(note)) && note.trim().split(/\s+/).length <= 14;
+  (READ_AGAIN.test(note) || ONE_MISSED.test(note) || RETRY_IT.test(note)) && note.trim().split(/\s+/).length <= 14;
 
 /**
  * "Change the title", with nothing after it: the words come next.

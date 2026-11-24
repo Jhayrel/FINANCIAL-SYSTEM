@@ -39,6 +39,16 @@
  *   B6  Money held for someone (On behalf, held) is followed the same way
  *       and kept apart: it is never the owner's own, and it is the last money
  *       used, after their own and after what they borrowed.
+ *   B7  Money set aside for the month's bills and subscriptions stays the
+ *       owner's for them (owner's instruction, 20 November 2026: "I have
+ *       allocated the money before debt ... but still be careful it should
+ *       know if it is really from debt"). In an account that pays a bill or
+ *       subscription later in the same month, that much of the owner's own
+ *       money is held back: other spending and transfers use the rest of
+ *       their own money, then borrowed money, and only then the money held
+ *       back. The bill uses the money held back first. When there was no own
+ *       money to hold back, the bill is still paid with borrowed money and
+ *       said so. Balances never change; only which money each row used.
  */
 
 import { owedChange, type Debt } from "./debt";
@@ -123,6 +133,17 @@ export function borrowedMoney(
   const spentHeld = new Map<string, BorrowedUse>();
 
   const bal = (a: string): Centavos => balance.get(a) ?? 0;
+  /*
+   * B7: what each account still pays this month for bills and subscriptions,
+   * by account and month, from the rows themselves; it falls as each is paid.
+   */
+  const setAside = (t: Transaction): boolean => t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions");
+  const needKey = (account: string, day: IsoDate): string => `${account}|${day.slice(0, 7)}`;
+  const need = new Map<string, Centavos>();
+  for (const t of rows) {
+    const from = t.fromWallet.trim();
+    if (setAside(t) && from && t.total > 0) need.set(needKey(from, t.date), (need.get(needKey(from, t.date)) ?? 0) + t.total);
+  }
   const lendersIn = (a: string): Lenders => {
     let l = borrowed.get(a);
     if (!l) {
@@ -179,9 +200,15 @@ export function borrowedMoney(
     // ── Money out of one of the owner's accounts (B2, B3) ─────────────────
     if (t.type !== "Revenue" && from && t.total > 0) {
       const own = Math.max(0, bal(from) - sum(borrowed.get(from)));
-      const fromOwn = Math.min(t.total, own);
-      const taken = take(from, t.total - fromOwn, t.type === "Debt" ? t.debtId : undefined);
+      // B7: own money held back for this month's bills, unless this row is one.
+      const key = needKey(from, t.date);
+      const heldBack = setAside(t) ? 0 : Math.min(own, need.get(key) ?? 0);
+      const freeOwn = Math.min(t.total, own - heldBack);
+      const taken = take(from, t.total - freeOwn, t.type === "Debt" ? t.debtId : undefined);
       const takenAll = sum(taken);
+      // What borrowed money could not cover comes out of the money held back.
+      const fromOwn = freeOwn + Math.min(heldBack, Math.max(0, t.total - freeOwn - takenAll));
+      if (setAside(t)) need.set(key, Math.max(0, (need.get(key) ?? 0) - t.total));
 
       if (takenAll > 0) {
         // A transfer to another of the owner's accounts carries its borrowed part; the fee is paid from own money first.

@@ -28,7 +28,12 @@ export interface EarnAsk {
   readonly only: string | null;
   /** A source left out: "not Framelink", "except Allowance". */
   readonly except: string | null;
+  /** A second period beside the first: "this month last month", "this month vs last month". */
+  readonly also?: { readonly from: IsoDate; readonly to: IsoDate; readonly name: string } | undefined;
 }
+
+/** The days a window names, said on their own: "this month", "last month", "this week", "today". */
+const DAY_WINDOW = /\b(?:this|last)\s+(?:week|month)\b|\btoday\b|\byesterday\b/gi;
 
 const ASKS = /\b(?:how much|magkano|total|what(?:'s| is| was)?|all)\b[^?.!]*\b(?:earn(?:ed|t|ings?)?|income|incoming|receiv(?:e|ed)|reciev(?:e|ed)|came in|made|kinita|kumita|revenue)\b|\b(?:all|total)\s+(?:my\s+)?(?:income|incoming|earnings|revenue)\b/i;
 const NOT_THIS = /\b(?:can|could|will|should|would|budget|need|if i|what if|plan|expect\w*|left|spend|spent|spending|this (?:week|month)|last (?:week|month)|today|yesterday)\b/i;
@@ -36,7 +41,16 @@ const EVER = /\b(?:since (?:the )?(?:beginning|start)|from the (?:beginning|star
 
 export function readEarnAsk(said: string, sources: readonly string[], asOf: IsoDate): EarnAsk | null {
   const text = said.trim();
-  if (!ASKS.test(text) || NOT_THIS.test(text)) return null;
+  if (!ASKS.test(text)) return null;
+  /*
+   * "How much bank interest i earn this month?" names a source and a month:
+   * the source's own figure for it. The month words kept every such question
+   * out, and it was answered with the whole month's income on a chart (owner,
+   * 20 November 2026: "it keep showing me the income chart like i didn't ask
+   * for it"). With no source named they still go to the month's summary.
+   */
+  const namesSource = sources.some((k) => k.trim().length >= 3 && new RegExp(`\\b${(k.trim().split(/\s+/).find((w) => w.length >= 4) ?? k.trim()).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text));
+  if (NOT_THIS.test(namesSource ? text.replace(DAY_WINDOW, " ") : text)) return null;
   const since = /\bsince\s+(20\d{2})\b|\bfrom\s+(20\d{2})\b/i.exec(text);
   const year = since ? Number(since[1] ?? since[2]) : null;
   /*
@@ -45,7 +59,11 @@ export function readEarnAsk(said: string, sources: readonly string[], asOf: IsoD
    * to the month's summary with the AI off (2 November 2026).
    */
   const period = year === null && !EVER.test(text) && namesWindow(text) ? windowOf(text, asOf) : null;
-  if (year === null && !EVER.test(text) && !period) return null;
+  // "this month last month": both, the second beside the first.
+  const both = namesSource && /\bthis\s+month\b/i.test(text) && /\blast\s+month\b/i.test(text);
+  const first = both ? windowOf("this month", asOf) : period;
+  const also = both ? windowOf("last month", asOf) : undefined;
+  if (year === null && !EVER.test(text) && !first) return null;
   if (year !== null && year > Number(asOf.slice(0, 4))) return null;
   const named = (k: string): RegExp => new RegExp(`\\b${k.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
   const firstWord = (k: string): RegExp => new RegExp(`\\b${(k.trim().split(/\s+/)[0] ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
@@ -62,7 +80,7 @@ export function readEarnAsk(said: string, sources: readonly string[], asOf: IsoD
    * exclusion (20 October 2026 replay of 13 October).
    */
   const correctsToAll = source !== undefined && /^\s*no\b[,.!]?\s*$/i.test(before) && /\b(?:all|every\w*|lahat|whole|total)\b/i.test(text.slice(before.length));
-  const within = period ? { from: period.from, to: period.to, name: period.name } : { from: year !== null ? `${year}-01-01` : null };
+  const within = first ? { from: first.from, to: first.to, name: first.name, ...(also ? { also } : {}) } : { from: year !== null ? `${year}-01-01` : null };
   if (correctsToAll) return { ...within, only: null, except: null };
   const excluded = source && new RegExp(String.raw`\b(?:no|not|except|excluding|without|other than|apart from|besides|hindi)\b[^.?!]{0,24}$`, "i").test(before);
   return { ...within, only: source && !excluded ? source : null, except: source && excluded ? source : null };
@@ -105,5 +123,7 @@ export function earnAnswer(ask: EarnAsk, transactions: readonly Transaction[], d
   const outside = q.cashIn - q.trueIncome;
   if (outside > 0) out.push(`Left out as not earned: ${money(outside)} of borrowing, opening balances and money moved between your own accounts.`);
   if (q.borrowed > 0 && !ask.only) out.push(`Borrowed in the same time: ${money(q.borrowed)}, which is not income.`);
+  // The second period asked about, worked out the same way.
+  if (ask.also) out.push(earnAnswer({ ...ask, from: ask.also.from, to: ask.also.to, name: ask.also.name, also: undefined }, transactions, debts, asOf));
   return out.join(" ");
 }
