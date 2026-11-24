@@ -5564,10 +5564,10 @@ export function AskPanel({
       const limitedNow = Object.keys(budgets[asOf.slice(0, 4)]?.categories ?? {});
       const said = readBudgetAsk(proposedLine.line, reference, asOf, limitedNow);
       /*
-       * "set December to 14272 total" keeps the month's bills inside the
-       * total, as typed totals do: the card made PHP 14,272.00 of spending
-       * and PHP 0.00 of bills from an answer that split it 12,750 and 1,522
-       * (owner, 19 November 2026).
+       * "set December to (a figure) total" keeps the month's bills inside
+       * the total, as typed totals do: the card made the whole figure
+       * spending and PHP 0.00 of bills, from an answer that had split it
+       * into spending and bills (owner, 19 November 2026).
        */
       const read =
         said && said.kind === "tracks" && said.total !== undefined && said.billsSubs === undefined && said.billsHint === undefined
