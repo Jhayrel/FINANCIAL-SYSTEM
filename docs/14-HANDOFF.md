@@ -3916,6 +3916,89 @@ now ends in the right card.
   how far the money lets it rise, never "already fits".
 - **A budget "based on the new balance"** is this month's, not next month's.
 
+### 2026-11-24: the 24 November backup, replayed as scenarios and what-ifs
+
+The owner's conversation of 18 to 24 November, replayed on the emulator.
+The router was a stand-in that makes the real router's mistakes. The model
+was a stand-in that only says it answered, so the robot shows where each
+message went. Then twenty what-if variations of the same flows, and the
+older regression robots. The scripts are `scen24.cjs` and `scen24b.cjs`, in
+the session's robot folder (not in the repository). Tests use invented
+figures (`backup24.test.ts`).
+
+- **Questions stay questions.** "Can you help me change?" and "That's wrong
+  can you see it" were taken as an edit or an investigation
+  (`asksRatherThanTells`, `challengesAnswer`).
+- **Debt taken out of a figure is a sum.** These were answered wrongly:
+  - "Like remove debt in the equation only real revenue" opened an empty
+    Debt card.
+  - "That's not the real revenue, thats a revenue with debt" also opened an
+    empty Debt card.
+  - "If you removed debt how much it total?" listed the bin.
+
+  Now guarded in three places: `talksArithmetic` (recall.ts), `DEBT_OUT`
+  (deletedAsk.ts) and `aboutAFigure` on the typed debt gate.
+- **Income apart from borrowing.**
+  - The AI context has a "Money in" section: income never counting
+    borrowing, what was borrowed, and both together.
+  - "I mean my total income +debt" draws no income chart, since that chart
+    leaves borrowing out (`incomeWithDebt`).
+  - "Total income including borrowed" no longer narrows the chart on screen
+    to entries that mention "borrowed".
+- **One source in a month.**
+  - "How much bank interest i earn this month?" is that source's figure,
+    not the month's income chart.
+  - "This month last month" gives both months.
+- **A budget from income is the income plan's card, not advice.** Asks
+  this covers:
+  - "Work out my budget with my new revenue"
+  - "adjust my budget based on income this month and not debt"
+  - "Re work my budget based on the money that I recieved"
+  - "redo my budget using what I earned"
+
+  Each was answered with a usual-month median, or by the model alone.
+- **Interest what-ifs** ("if I have a million in Maya Bank"). Worked out
+  from what the account was credited against the balance it held each day
+  (`interestIf.ts`). The model had made a rate from one credit.
+- **Buying with a credit line.**
+  - "I paid (a figure) for food using maya credit" is a borrowing card plus
+    a spending card out of the wallet the borrowing lands in.
+  - Two older tests said such a sentence reads as no debt at all. They now
+    pin this rule, and still pin that it is never a payment off the line.
+  - A picture read as a borrowing and a spend of the same amount is paired
+    the same way (`creditPurchase.ts`).
+- **Rule B7, money set aside for bills and subscriptions (borrowed.ts).**
+  - Changed at the owner's instruction of 20 November.
+  - A bill paid in a month the wallet held its own money for is no longer
+    said to be paid with borrowed money.
+  - Borrowed money in hand and own money are unchanged.
+- **Cards on screen.**
+  - "Yesterday" dates the open card.
+  - "Retry the entry" reads the picture again.
+  - A question never edits a card: "how much do I owe maya credit" had moved
+    an open Food card to Maya, on the wallet name inside the credit line's
+    name.
+  - "Change it to transport" is Travel, by the owner's own notes.
+  - A kind they do not have is said back, and the card keeps its own.
+- **"Show me the flow where my money went"** is spending by kind, not each
+  account's balance (quickAsk.ts).
+
+Robot results:
+
+| Robot | Result |
+|---|---|
+| Scenarios and what-ifs (`scen24`, `scen24b`) | Each message ends where it should |
+| Card edits (`edits1` to `edits4`) | Pass |
+| Budget conversation (`budget18`) | Unchanged |
+| Money operations (`process`) | 19 of 19, to the centavo |
+| Debt (`debt16`) | Pass |
+| Two devices (`sync16`) | Pass |
+| What-ifs (`whatif`) | Pass |
+| Chat battery | 41 of 41 |
+
+The process robot's plan step was dated 20 November, which is now in the
+past, so it was run dated 28 November.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -3978,11 +4061,9 @@ now ends in the right card.
     Maya does. The chat sets the first: "Maya Credit is due 15 days after
     the bill closes".
 
-11. **#4049, the BDO ATM withdrawal of 18 November (found 18 November).**
-    Saved with a fee of ₱0.00; the slip shows an ₱18.00 fee taken with it.
-    Until it is edited, Maya in the app is ₱18.00 above Maya's own balance.
-    Database, #4049, Edit, Fee ₱18.00, Save. Reported, never changed from
-    here.
+11. **#4049, the BDO ATM withdrawal of 18 November: done by the owner.**
+    Saved with a fee of ₱0.00 when the slip showed an ₱18.00 fee. The 24
+    November backup has the fee.
 
 ---
 

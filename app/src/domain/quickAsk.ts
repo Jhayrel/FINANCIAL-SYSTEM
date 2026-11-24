@@ -46,7 +46,7 @@ export type QuickAsk =
   | { readonly kind: "recurring"; readonly which: "bills" | "subscriptions" | "both" };
 
 const BIGGEST =
-  /\b(?:biggest|largest|highest|top|most)\b[^?.!]{0,30}\b(?:expenses?|spending|spend|costs?|gastos|categor(?:y|ies)|kinds?)\b|\bwhere\s+(?:did|does|do)\s+(?:most\s+of\s+)?my\s+money\s+go\b|\bsaan\s+(?:napunta|nauubos)\b|\bwhat\s+(?:did|do)\s+i\s+spend\s+(?:the\s+)?most\s+on\b|\bpinaka\s*malaki\b[^?.!]{0,20}\bgastos\b/i;
+  /\b(?:biggest|largest|highest|top|most)\b[^?.!]{0,30}\b(?:expenses?|spending|spend|costs?|gastos|categor(?:y|ies)|kinds?)\b|\bwhere\s+(?:(?:did|does|do)\s+)?(?:most\s+of\s+)?(?:all\s+)?my\s+money\s+(?:go|goes|went|is\s+going)\b|\bsaan\s+(?:napunta|nauubos)\b|\bwhat\s+(?:did|do)\s+i\s+spend\s+(?:the\s+)?most\s+on\b|\bpinaka\s*malaki\b[^?.!]{0,20}\bgastos\b/i;
 const BREAKDOWN = /\b(?:breakdown|break\s*down|split)\b[^?.!]{0,30}\b(?:spending|spend|spent|expenses?|gastos)\b|\b(?:spending|expenses?)\s+(?:breakdown|by\s+(?:kind|category|item))\b/i;
 const BUDGET =
   /\b(?:am\s+i|are\s+we|did\s+i\s+go|have\s+i\s+gone|is\s+my\s+spending)\s+(?:over|above|past|within|under)\s+(?:my\s+|the\s+)?budget\b|\bover\s+(?:my\s+|the\s+)?budget\s*\?|\blagpas\b[^?.!]{0,20}\bbudget\b|\b(?:how\s+much|magkano|what'?s|what\s+is)\b[^?.!]{0,30}\b(?:left|natitira|matitira|remaining|natira)\b[^?.!]{0,20}\bbudget\b|\bbudget\b[^?.!]{0,20}\b(?:left|natitira|remaining|natira)\b|\bhow\s+(?:is|'?s)\s+my\s+budget\b/i;
@@ -89,7 +89,13 @@ export function readQuickAsk(text: string, kinds: readonly string[] = [], wallet
     const named = wallets.find((w) => new RegExp(`\\b${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t));
     const asksIn = /\b(?:how\s+much|magkano|what'?s|what\s+is|balance|laman|left)\b/i.test(t) && /\b(?:in|on|sa|my|ng|balance|laman|left|have)\b/i.test(t);
     if (named && asksIn && !/\b(?:spend|spent|gastos|nagastos|budget|limit|paid|pay|credit|loan|utang)\b/i.test(t)) return { kind: "balance", wallet: named };
-    if (MONEY_NOW.test(t) && !/\b(?:spend|spent|gastos|nagastos|budget|save|saved|owe|debt|utang|need|credit|loan)\b/i.test(t)) return { kind: "balance", wallet: null };
+    /*
+     * "Can you show me the flow where my money went this month" is where it
+     * went, not what each account holds: it was answered with Balance by
+     * account (owner, 24 November 2026).
+     */
+    const wentWhere = /\bwhere\b[^?.!]{0,25}\bmoney\s+(?:go|goes|went|is\s+going)\b|\bflow\b|\bnapunta\b/i.test(t);
+    if (MONEY_NOW.test(t) && !wentWhere && !/\b(?:spend|spent|gastos|nagastos|budget|save|saved|owe|debt|utang|need|credit|loan)\b/i.test(t)) return { kind: "balance", wallet: null };
   }
   if (BUDGET_STATUS.test(t)) return { kind: "budget" };
   const flat = ` ${t.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;

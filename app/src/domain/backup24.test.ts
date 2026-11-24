@@ -9,9 +9,11 @@ import { describe, expect, it } from "vitest";
 
 import { borrowedMoney } from "./borrowed";
 import { asksRatherThanTells } from "./budgetAsk";
-import { asksToReadAgain } from "./capture";
+import { amend, asksToReadAgain } from "./capture";
 import { pairCreditPurchases } from "./creditPurchase";
+import { chartHelps } from "./chartAsk";
 import { challengesAnswer } from "./dayFit";
+import { asksAboutDeleted } from "./deletedAsk";
 import type { Debt } from "./debt";
 import { readDebtSentence } from "./debtSentence";
 import { readEarnAsk } from "./earnAsk";
@@ -19,6 +21,7 @@ import { emptyDraft } from "./entry";
 import { readIncomePlan } from "./incomeBudget";
 import { earnedRate, interestIfWords, readInterestIf } from "./interestIf";
 import { readMoney, type Proposal } from "./proposal";
+import { readQuickAsk } from "./quickAsk";
 import { detectRecall, talksArithmetic } from "./recall";
 import type { Transaction } from "./types";
 
@@ -151,5 +154,77 @@ describe("money set aside for bills stays the owner's (B7)", () => {
 describe("read the picture again", () => {
   it.each(["Retry the entry", "redo the receipt", "try the picture again", "retry"])("%s", (s) => {
     expect(asksToReadAgain(s)).toBe(true);
+  });
+});
+
+describe("debt taken out of a figure is a sum, never the bin", () => {
+  it.each(["If you removed debt how much it total?", "what is my income without the debt", "take out my loans, how much is left"])("%s", (s) => {
+    expect(asksAboutDeleted(s)).toBe(false);
+  });
+  it.each(["what did I delete last week", "I think I removed a wrong entry", "show the bin"])("still the bin: %s", (s) => {
+    expect(asksAboutDeleted(s)).toBe(true);
+  });
+  it("talks arithmetic", () => {
+    expect(talksArithmetic("If you removed debt how much it total?")).toBe(true);
+  });
+});
+
+describe("where the money went is spending by kind, not balances", () => {
+  const wallets = ["Cash", "Wallet"];
+  it.each(["Can you show me the flow where my money went this month", "show me where my money went", "where did my money go this month"])("%s", (s) => {
+    expect(readQuickAsk(s, ["Food"], wallets)?.kind).toBe("biggest");
+  });
+  it("how much money do I have is still the balances", () => {
+    expect(readQuickAsk("how much money do I have", ["Food"], wallets)).toEqual({ kind: "balance", wallet: null });
+  });
+  it("a source named this month is its own question, not the month's income", () => {
+    // The quick reader still reads the month; the panel hands a named source to the earnings reader.
+    expect(readEarnAsk("How much bank interest i earn this month?", ["Bank interest", "Allowance"], "2026-11-24")?.only).toBe("Bank interest");
+  });
+});
+
+describe("income with debt beside it draws no income chart", () => {
+  const hint = { by: "item" as const, money: "income" as const };
+  it.each(["I mean my total income +debt", "my income plus debt this month", "income and borrowed money", "debt + income"])("%s", (s) => {
+    expect(chartHelps(s, hint, false)).toBe(false);
+  });
+  it("income alone is still drawn", () => {
+    expect(chartHelps("what came in this month by source", hint, false)).toBe(true);
+  });
+});
+
+describe("a budget from income is the income plan, not advice", () => {
+  it.each(["Work out my budget with my new revenue", "Wait can we just adjust my budget based on income this month and not debt", "Re work my budget based on the money that I recieved"])("%s", (s) => {
+    expect(readIncomePlan(s)).not.toBeNull();
+  });
+});
+
+describe("an open card is changed only when asked to", () => {
+  const reference = {
+    wallets: ["Cash", "Wallet"], savings: [], spendingTypes: [
+      { name: "Food", remark: "Food expense", necessity: "essential" as const },
+      { name: "Travel", remark: "Traveling", necessity: "discretionary" as const },
+    ], revenueCategories: ["Allowance"], bills: [], subscriptions: [], credits: ["Wallet Credit"],
+  } as unknown as Parameters<typeof amend>[2];
+  const card = { ...emptyDraft("2026-11-24"), flow: "Spending" as const, category: "Spending" as const, item: "Food", amount: 5000, fromWallet: "Cash" };
+  it.each(["how much do I owe wallet credit", "what is my balance in wallet", "when is wallet credit due"])("a question leaves it: %s", (s) => {
+    expect(amend(card, s, reference, "2026-11-24")).toBeNull();
+  });
+  it("change it to transport is Travel", () => {
+    expect(amend(card, "change it to transport", reference, "2026-11-24")?.draft.item).toBe("Travel");
+  });
+  it("a kind they do not have is said, and the card keeps its own", () => {
+    const a = amend(card, "make it spaceship", reference, "2026-11-24");
+    expect(a?.draft.item).toBe("Food");
+    expect(a?.what).toMatch(/not one of your kinds of spending/);
+  });
+  it("still takes a wallet said on its own", () => {
+    expect(amend(card, "wallet", reference, "2026-11-24")?.draft.fromWallet).toBe("Wallet");
+  });
+});
+
+describe("income words for a budget", () => {
+  it("redo my budget using what I earned", () => {
+    expect(readIncomePlan("redo my budget using what I earned")).not.toBeNull();
   });
 });

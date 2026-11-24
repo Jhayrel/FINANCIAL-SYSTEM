@@ -77,7 +77,7 @@ describe("the four steps are named, and in order", () => {
    * (`isEssay`), which are several entries the model is asked to split.
    */
   it("decides debt before the model is asked anything", () => {
-    expect(at("if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay)")).toBeLessThan(
+    expect(at("if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay && !aboutAFigure)")).toBeLessThan(
       at("const found = await readAttached(note);"),
     );
   });
@@ -105,7 +105,9 @@ describe("the four steps are named, and in order", () => {
    * give.
    */
   it("does not open a debt card for a question about borrowing", () => {
-    expect(source).toContain("if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay)");
+    expect(source).toContain("if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay && !aboutAFigure)");
+    // Nor for a sum, a dispute or a request that names debt (24 November 2026).
+    expect(source).toContain("const aboutAFigure = talksArithmetic(ruled) || challengesAnswer(ruled)");
   });
 
   /** The message is echoed once, by the analyse step, and not again below. */

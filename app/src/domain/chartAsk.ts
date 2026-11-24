@@ -338,6 +338,13 @@ export function chartHelps(question: string, hint: ChartHint | null, chartJustSh
    */
   if (COMPARES.test(question) && !COMPARES_OWN.test(question)) return false;
   /*
+   * Income with borrowing beside it ("I mean my total income +debt") is a
+   * figure the income chart cannot show: it leaves borrowing out, so it drew
+   * the month's income alone under a question about both (owner, 24 November
+   * 2026). Said in words, from the figures that keep the two apart.
+   */
+  if (INCOME_WITH_DEBT.test(question)) return false;
+  /*
    * Drawn beside the words whenever the question has a shape a picture
    * shows: a split, a ranking, a forecast, a budget, a balance or a debt
    * over time. The owner, 9 November 2026: "they know the right time to
@@ -349,6 +356,13 @@ export function chartHelps(question: string, hint: ChartHint | null, chartJustSh
   return true;
 }
 
+/** Income with borrowing put beside it: no chart of income can show that, since income leaves borrowing out. */
+export function incomeWithDebt(question: string): boolean {
+  return INCOME_WITH_DEBT.test(question);
+}
+
+const INCOME_WITH_DEBT =
+  /\b(?:income|revenue|earn\w*|came\s+in)\b[^?.!]{0,30}(?:\+|\b(?:plus|with|and|including|includes?)\b)\s*(?:the\s+|my\s+|all\s+)?(?:debts?|borrow\w*|loans?|credit|utang)\b|\b(?:debts?|borrow\w*|loans?)\s*(?:\+|\b(?:plus|and)\b)\s*(?:my\s+)?(?:income|revenue|earn\w*)\b/i;
 const COMPARES = /\b(?:compare[sd]?|comparing|comparison|vs\.?|versus|against)\b/i;
 /** Compared with something of the owner's own: a period, the budget, a plan, income or spending. */
 const COMPARES_OWN =

@@ -137,7 +137,7 @@ import {
   type Chart,
   type ComparedPeriods,
 } from "../domain/charts";
-import { asksForecast, BUDGET_PURPOSE, buildAllocationChart, buildMeasureChart, forecastEmptyWords, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
+import { asksForecast, BUDGET_PURPOSE, buildAllocationChart, buildMeasureChart, forecastEmptyWords, chartHelps, chartReading, chartsWorked, incomeWithDebt, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
 import { questionMeant } from "../domain/drawBack";
 import { asksUpcoming, buildUpcomingChart, upcomingOf, upcomingWords } from "../domain/upcoming";
 import { billNamed } from "../domain/billsAsk";
@@ -7139,7 +7139,16 @@ export function AskPanel({
     const quick =
       (quickRead && quickChartAsked && (quickRead.kind === "balance" || quickRead.kind === "worth" || quickRead.kind === "savings")) ||
       // Two periods asked about are a comparison, and "biggest spending day" is a day: neither is the quick answer's (9 November 2026 sweep).
-      (quickRead && (comparedPeriods(ruled, asOf) !== null || asksBiggestDay(ruled)))
+      (quickRead && (comparedPeriods(ruled, asOf) !== null || asksBiggestDay(ruled))) ||
+      /*
+       * "How much bank interest i earn this month?" names one source: its own
+       * figure, worked out by the earnings reader below. "I mean my total
+       * income +debt" puts borrowing beside income, which the month's income
+       * leaves out. Each was answered with the whole month's income on a
+       * chart (owner, 24 November 2026: "it keep showing me the income chart
+       * like i didn't ask for it").
+       */
+      (quickRead?.kind === "received" && ((readEarnAsk(ruled, reference.revenueCategories, asOf)?.only ?? null) !== null || /\b(?:debts?|borrow\w*|loans?|utang|credit)\b/i.test(ruled)))
         ? null
         : quickRead;
     if (quick) {
@@ -9505,7 +9514,14 @@ export function AskPanel({
        * worked out step by step (26 October 2026). Not a question about today.
        */
       const needs = !affordish && !essay && ((!keepsBudget && (asksWhatItNeeds(ruled) || planQuestion)) || plansAlign);
-      const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome || checksFit || needs || keepsBudget);
+      /*
+       * "Work out my budget with my new revenue", "can we just adjust my
+       * budget based on income this month and not debt" ask for the budget
+       * built from the money that came in: the income plan's card below, not
+       * advice with a median figure (owner, 24 November 2026).
+       */
+      const fromIncome = readIncomePlan(ruled) !== null;
+      const budgetish = !affordish && ((asksBudgetAdvice(ruled) && !fromIncome) || splitAgain || newIncome || checksFit || needs || keepsBudget);
       const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf, reference.wallets) : null;
       // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
       const earned = !affordish && !budgetish && !spent && !wantsChart(note) ? readEarnAsk(ruled, reference.revenueCategories, asOf) : null;
@@ -11396,7 +11412,7 @@ export function AskPanel({
       lastDeletedAsk.current = null;
       return;
     }
-    if (openCards.length === 0 && !pending && files.length === 0 && !as && (deletedFollowUp || asksAboutDeleted(ruled))) {
+    if (openCards.length === 0 && !pending && files.length === 0 && !as && (deletedFollowUp || (asksAboutDeleted(ruled) && !talksArithmetic(ruled)))) {
       const window = deletedFollowUp ?? deletedWindowIn(note, asOf);
       const found = deletedRows(deleted, window);
       setDraft("");
@@ -11662,9 +11678,16 @@ export function AskPanel({
      * card asking how much the gas was (10 November 2026 sweep).
      */
     const chartJustAbove = (lastShown !== undefined && isChart(lastShown)) || turns.slice(-3).some(isChart);
-    const narrows = files.length === 0 && !as && chartJustAbove && narrowsChart(ruled);
+    /*
+     * "total income including borrowed this month" after an income chart
+     * narrowed it to entries mentioning "borrowed" and said there was nothing
+     * to draw (24 November 2026 what-if run): income with borrowing beside it
+     * is a question, answered in words.
+     */
+    const besideDebt = incomeWithDebt(ruled);
+    const narrows = files.length === 0 && !as && chartJustAbove && !besideDebt && narrowsChart(ruled);
     // A chart drawn in the last few turns, not ten hours ago (backup of 7 October 2026).
-    const followUp = isChartFollowUp(ruled, turns.slice(-6).some(isChart)) || narrows;
+    const followUp = (!besideDebt && isChartFollowUp(ruled, turns.slice(-6).some(isChart))) || narrows;
     const saysChart = routed?.intent === "chart";
 
     /**
@@ -11734,7 +11757,7 @@ export function AskPanel({
       !/^\s*(?:i\s+|i've\s+|ive\s+)?(?:bought|paid|pay|spent|got|received|sent|send|transfer\w*|add|record|log|plan|budget|set)\b/i.test(note) &&
       !/\?\s*$/.test(note);
     const writtenHint =
-      files.length === 0 && !as && !aboutADebt && (presentation === "text" || (!followUp && !narrows)) && presentation !== "chart" &&
+      files.length === 0 && !as && !aboutADebt && !besideDebt && (presentation === "text" || (!followUp && !narrows)) && presentation !== "chart" &&
       /\b(?:spend|spent|spending|expenses?|gastos|income|incoming|earn\w*|revenue|money (?:went|go)|subscriptions?|bills)\b/i.test(note) &&
       (bareSubject || /\b(?:summary|summari[sz]e|overview|breakdown|break down|detailed|details|list|show|where|what did i|vs\.?|versus|compared?)\b/i.test(note))
         ? (localHint(ruled, credits) ?? { by: "item" })
@@ -12801,7 +12824,14 @@ export function AskPanel({
          * two entries: the model is taught to split it (ai.ts), and this card
          * would have filed the lot as theirs. See `splitsWhose`.
          */
-        if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay) {
+        /*
+         * "Like remove debt in the equation only real revenue" and "That's
+         * not the real revenue, thats a revenue with debt" (owner, 24
+         * November 2026) name debt while asking about a figure: each opened
+         * an empty Debt card. Sums, disputes and requests are questions.
+         */
+        const aboutAFigure = talksArithmetic(ruled) || challengesAnswer(ruled) || (asksRatherThanTells(ruled) && !/\d/.test(ruled));
+        if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay && !aboutAFigure) {
           say({ kind: "you", text: note });
           /**
            * Finished here, not by being sent to the form.

@@ -542,6 +542,12 @@ export function amend(
    * card into PHP 28.00 (20 October 2026 replay).
    */
   if (/\b(?:why|how come|are you (?:sure|certain)|is (?:that|it|this) (?:right|correct|true)|did you)\b/i.test(trimmed)) return null;
+  /*
+   * A question of its own is never a change to the card: "how much do I owe
+   * maya credit" with a Food card open moved the card to Maya, on the wallet
+   * name inside "maya credit" (24 November 2026 what-if run).
+   */
+  if (/^\s*(?:how\s+(?:much|many|long|often|do|does|did|is|are|can|will)|what(?!\s+about)|when|where|who|which|do\s+i|did\s+i|does|is\s+there|are\s+there|can\s+i|magkano|ilan|kailan|saan)\b/i.test(trimmed)) return null;
 
   /*
    * "change the description to Buy food" was typed with the card open and
@@ -726,12 +732,31 @@ export function amend(
       const description = extra ? `${draft.description.trim()} ${extra}`.trim().slice(0, 500) : draft.description;
       return { draft: { ...draft, item: leading.item, description }, what: `${leading.item} instead${extra ? `, "${extra}" added to the description` : ""}.` };
     }
+    /*
+     * "change it to transport" with no kind called that: Travel, by the
+     * owner's own notes and the usual words for it (`matchItem`). Only for a
+     * change asked in so many words; "that's the purchase" is not one. It
+     * was taken for an edit of a saved entry and answered "No entry matches
+     * that" (24 November 2026 what-if run).
+     */
+    const asked = /^(?:no[,.!]?\s+|actually[,.!]?\s+|wait[,.!]?\s+)?(?:make it|change it to|it should be|should be|dapat)\b/i.test(trimmed);
+    if (asked && !right && !leading) {
+      const loose = matchItem(said[1].trim(), draft.flow, draft.category, reference);
+      if (loose.matched && loose.item !== draft.item && (!wrong || wrong === draft.item.trim().toLowerCase())) {
+        return { draft: { ...draft, item: loose.item }, what: `${loose.item} instead.` };
+      }
+    }
     if (draft.flow === "Spending" && !right) {
       const bill = matchExact(said[1].trim(), reference.bills);
       const sub = bill ? "" : matchExact(said[1].trim(), reference.subscriptions);
       if ((bill || sub) && (!wrong || wrong === draft.item.trim().toLowerCase())) {
         return { draft: { ...draft, item: bill || sub, category: bill ? "Bills" : "Subscriptions" }, what: `${bill || sub} instead, as a ${bill ? "bill" : "subscription"}.` };
       }
+    }
+    // Asked for, and not one of theirs: said so, and the card keeps its kind.
+    if (asked && !right && !leading && said[1].trim().split(/\s+/).length <= 3 && !/\d/.test(said[1])) {
+      const kinds = draft.flow === "Revenue" ? "kinds of income" : "kinds of spending";
+      return { draft, what: `"${said[1].trim()}" is not one of your ${kinds}, so it stays ${draft.item || "as it was"}. Pick one of yours on the card, or add it in Settings first.` };
     }
   }
 

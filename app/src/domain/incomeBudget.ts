@@ -437,7 +437,7 @@ export function readIncomePlan(text: string): IncomePlanAsk | null {
    * say it, and the verbs they use. Each went to a usual-month median, for
    * December, or below what November had already spent.
    */
-  if (!/\b(?:income|salary|sahod|kita|earn(?:ing|ings)?|earned|revenue|money\s+(?:that\s+)?(?:i\s+)?(?:received|recieved|recived|got|earned)|what\s+(?:came|comes)\s+in)\b/i.test(t)) return null;
+  if (!/\b(?:income|salary|sahod|kita|earn(?:ing|ings)?|earned|revenue|money\s+(?:that\s+)?(?:i\s+)?(?:received|recieved|recived|got|earned)|what\s+(?:came|comes)\s+in|what\s+(?:i|we)\s+(?:earned|received|recieved|got|made))\b/i.test(t)) return null;
   if (!/\b(?:base[sd]?|from|out of|using|with|set|make|plan|split|income[- ]based|work(?:ed)?\s+out|re-?\s*work|adjust|redo|recompute|recalculate)\b/i.test(t)) return null;
   // A question about the budget against income is answered, never made a card (`asksIncomeBudget`).
   if (/\?\s*$/.test(t) && !/\b(?:can you|could you|please|pls)\b/i.test(t)) return null;
@@ -474,7 +474,9 @@ export function readIncomePlan(text: string): IncomePlanAsk | null {
    */
   // "can we just adjust my budget based on income" asks for it done; "let me know if we can" asks whether.
   const request = /\b(?:can|could)\s+(?:we|you|i)\s+(?:just\s+|please\s+)?(?:adjust|set|change|base|make|update|re-?\s*work|redo|work\s+out)\b/i.test(t);
-  if ((income === null || income <= 0) && keep === null && !request && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any|let\s+me\s+know|tell\s+me|can\s+(?:we|i)|could\s+(?:we|i)|whether|if\s+(?:we|i)\s+can|is\s+it|do\s+you\s+think|possible)\b/i.test(t)) return null;
+  // "what I earned" and "what came in" name the income; they do not ask.
+  const asking = t.replace(/\bwhat\s+(?:i|we)\s+(?:earned|received|recieved|got|made)\b|\bwhat\s+(?:came|comes)\s+in\b/gi, " ");
+  if ((income === null || income <= 0) && keep === null && !request && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any|let\s+me\s+know|tell\s+me|can\s+(?:we|i)|could\s+(?:we|i)|whether|if\s+(?:we|i)\s+can|is\s+it|do\s+you\s+think|possible)\b/i.test(asking)) return null;
   return { income: income !== null && income > 0 ? income : null, keep };
 }
 

@@ -250,8 +250,13 @@ describe("what a sentence says about it", () => {
   });
 
   it("never reads paying with credit as paying it off", () => {
-    expect(read("paid 500 for food using maya credit").effect).toBeUndefined();
-    expect(read("I paid with my maya credit 500").effect).toBeUndefined();
+    /*
+     * Buying with the line is borrowing, with the purchase beside it: "if i
+     * pay using credit add it like paying using credit" (owner, 20 November
+     * 2026). Never a payment off the line.
+     */
+    expect(read("paid 500 for food using maya credit")).toMatchObject({ effect: "draw", amount: 50000, bought: true });
+    expect(read("I paid with my maya credit 500").effect).not.toBe("repay");
   });
 
   it("reads borrowing, and leaves a sentence with both for the owner", () => {

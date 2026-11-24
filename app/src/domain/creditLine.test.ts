@@ -165,7 +165,8 @@ describe("the credit line the sentence named", () => {
   it("reads what the movement does only from a plain verb", () => {
     expect(read("I borrowed 2000 on maya credit into gcash").draft.debtEffect).toBe("draw");
     expect(read("I paid my maya credit 1000 from gcash").draft.debtEffect).toBe("repay");
-    expect(read("I paid 500 for food using maya credit").draft.debtEffect).toBeUndefined();
+    // Bought with the line: borrowing, and the purchase as its own card (owner, 20 November 2026).
+    expect(read("I paid 500 for food using maya credit").draft.debtEffect).toBe("draw");
     expect(read("I recived it in maya and the credit is from maya credit").draft.debtEffect).toBe("draw");
   });
 

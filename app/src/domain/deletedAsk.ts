@@ -40,12 +40,20 @@ const LOOKING =
 /** Bringing a named row back is the restore finder's job, which matches on what the row was. */
 const RESTORE_ONE = /\b(?:restore|bring\s+back|undelete|recover|put\s+back|unbin|retrieve|ibalik)\b/i;
 
+/** Debt or borrowing taken out of a figure. */
+const DEBT_OUT = /\b(?:removed?|removing|without|minus|excluding|exclude|take\s+out|took\s+out|taken\s+out)\s+(?:the\s+|my\s+|all\s+)?(?:debts?|borrow\w*|loans?|credit|utang)\b/i;
+
 /** "delete the gas", "remove that": a request to delete, which is not this. */
 const ORDER_TO_DELETE = /^\s*(?:please\s+|pls\s+|can\s+you\s+|could\s+you\s+)?(?:delete|remove|bin|erase|trash)\b/i;
 
 export function asksAboutDeleted(text: string): boolean {
   const t = text.trim();
   if (!t || ORDER_TO_DELETE.test(t)) return false;
+  /*
+   * Debt taken out of a figure is a sum, not a row: "If you removed debt how
+   * much it total?" listed the bin (owner, 24 November 2026).
+   */
+  if (DEBT_OUT.test(t) && !/\b(?:entry|entries|row|rows|record|transaction)\b|#\d/i.test(t)) return false;
   if (RESTORE_ONE.test(t) && !/\b(?:what|which|show|list|everything|all)\b/i.test(t)) return false;
   // "Restore everything in the bin": the list, with its Restore all (27 October 2026 sweep: "nothing in the bin matches that").
   if (RESTORE_ONE.test(t) && /\b(?:everything|all)\b/i.test(t)) return DELETED.test(t);
